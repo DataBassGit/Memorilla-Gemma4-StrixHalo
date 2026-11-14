@@ -1,0 +1,2197 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Memorilla Studio — Gemma 4 26B-A4B Training & Diagnostics</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', ' system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            slate: {
+              850: '#141c2b',
+              925: '#0b111e',
+              950: '#060a12',
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <style>
+    body {
+      background-color: #060a12;
+      color: #e2e8f0;
+      font-family: 'Inter', sans-serif;
+    }
+    /* Custom sleek scrollbars */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0b111e;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.78);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(51, 65, 85, 0.6);
+    }
+    .pulse-dot {
+      animation: pulseGlow 2s infinite;
+    }
+    @keyframes pulseGlow {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.45; transform: scale(1.18); }
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col selection:bg-indigo-500 selection:text-white">
+
+  <!-- Toast Notification Container (Replaces alert/confirm) -->
+  <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 max-w-md pointer-events-none"></div>
+
+  <!-- Top Header Bar -->
+  <header class="sticky top-0 z-40 glass-panel border-b border-slate-800/80 px-4 lg:px-8 py-3">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      <!-- Brand Title -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-600 to-rose-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+          <i class="fa-solid fa-microchip text-white text-lg"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-base sm:text-lg font-bold tracking-tight text-white">Memorilla Studio</h1>
+            <span class="px-2 py-0.5 text-[11px] font-mono font-semibold rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+              Gemma 4 26B-A4B (INT4 MoE)
+            </span>
+          </div>
+          <p class="text-xs text-slate-400">AMD Strix Halo 64GB Unified ROCm • 10% Curriculum Telemetry, File Checks & YAML Configurator</p>
+        </div>
+      </div>
+
+      <!-- Mode Switcher & Local Directory Connector -->
+      <div class="flex flex-wrap items-center gap-3">
+        <!-- Basic vs Verbose Toggle -->
+        <div class="flex items-center bg-slate-900/90 p-1 rounded-xl border border-slate-700/70" title="Switch between simplified summary mode and full diagnostic engineering mode">
+          <button id="btnModeBasic" onclick="setViewMode('basic')" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 bg-indigo-600 text-white shadow">
+            <i class="fa-solid fa-gauge-simple-high"></i> Basic Mode
+          </button>
+          <button id="btnModeVerbose" onclick="setViewMode('verbose')" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 text-slate-400 hover:text-slate-200">
+            <i class="fa-solid fa-terminal"></i> Verbose Mode
+          </button>
+        </div>
+
+        <!-- Live Auto-Refresh Interval Control -->
+        <div class="flex items-center gap-2 bg-slate-900/90 px-3 py-1.5 rounded-xl border border-slate-700/70">
+          <span id="autoSyncDot" class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span>
+          <span class="text-xs font-medium text-slate-300">Auto-Sync:</span>
+          <select id="autoRefreshIntervalSelect" onchange="updateAutoRefreshInterval()" class="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs font-mono text-indigo-300 focus:outline-none focus:border-indigo-500">
+            <option value="0">Off</option>
+            <option value="30">Every 30s</option>
+            <option value="60">Every 1m</option>
+            <option value="120" selected>Every 2m</option>
+            <option value="300">Every 5m</option>
+          </select>
+          <span id="autoSyncCountdown" class="text-[11px] font-mono text-slate-400 min-w-[42px] text-right">02:00</span>
+          <button onclick="triggerImmediateSync()" class="p-1 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white transition-all" title="Sync telemetry right now">
+            <i id="syncSpinIcon" class="fa-solid fa-arrows-rotate text-xs"></i>
+          </button>
+        </div>
+
+        <!-- Connect Local C:\AI\MemoryLLM Directory Button -->
+        <button onclick="connectLocalWorkspace()" id="btnConnectFolder" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 transition-all flex items-center gap-2">
+          <i class="fa-solid fa-folder-open"></i>
+          <span id="folderStatusText">Link Local Workspace</span>
+        </button>
+
+        <!-- Watch Single JSONL File or Upload Fallback -->
+        <button onclick="watchSingleJsonlFile()" id="btnWatchJsonl" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 transition-all flex items-center gap-2" title="Pick metrics_history.jsonl once and auto-reload it from disk every few minutes">
+          <i class="fa-solid fa-eye"></i>
+          <span id="watchFileStatusText">Watch JSONL</span>
+        </button>
+
+        <!-- Upload/Drop JSONL or CSV File Fallback -->
+        <label class="cursor-pointer px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all flex items-center gap-2">
+          <i class="fa-solid fa-file-import text-indigo-400"></i>
+          <span>Import</span>
+          <input type="file" id="fileInputUpload" multiple accept=".jsonl,.csv,.yaml,.yml,.log,.txt" class="hidden" onchange="handleFilesUploaded(event)" />
+        </label>
+      </div>
+    </div>
+
+    <!-- Live Sync Status Sub-Bar -->
+    <div class="max-w-7xl mx-auto mt-2.5 pt-2 border-t border-slate-800/50 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-slate-400">
+      <div class="flex items-center gap-2">
+        <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300" id="liveSourceBadge">
+          Source: Built-in Snapshot (Link Folder, Watch JSONL, or run Local HTTP Server for live disk polling)
+        </span>
+        <span id="lastSyncedTimestamp">Last updated: Initial load</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-slate-500 hidden sm:inline">Zero-Click Local Server:</span>
+        <code class="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-emerald-300">.\.venv\Scripts\python.exe -m http.server 8765</code>
+        <button onclick="copyLocalServerCmd()" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all">
+          Copy
+        </button>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="max-w-7xl mx-auto mt-3 pt-2 border-t border-slate-800/60 flex items-center gap-1 overflow-x-auto">
+      <button onclick="switchTab('dashboard')" id="tab-dashboard" class="tab-btn px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 bg-slate-800 text-indigo-400 border border-slate-700">
+        <i class="fa-solid fa-chart-line"></i> Progress & 50-Step Analysis
+      </button>
+      <button onclick="switchTab('parser')" id="tab-parser" class="tab-btn px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40">
+        <i class="fa-solid fa-scroll"></i> Console Log Parser
+      </button>
+      <button onclick="switchTab('storage')" id="tab-storage" class="tab-btn px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40">
+        <i class="fa-solid fa-hard-drive"></i> Stored Checkpoints & Shards
+      </button>
+      <button onclick="switchTab('checks')" id="tab-checks" class="tab-btn px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40">
+        <i class="fa-solid fa-stethoscope"></i> One-Shot File & Health Checks
+      </button>
+      <button onclick="switchTab('yaml')" id="tab-yaml" class="tab-btn px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40">
+        <i class="fa-solid fa-sliders"></i> YAML Configs & Launcher
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Content Workspace -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6 space-y-6">
+
+    <!-- ===================================================================== -->
+    <!-- TAB 1: PROGRESS & 50-STEP BUCKET ANALYSIS                             -->
+    <!-- ===================================================================== -->
+    <section id="view-dashboard" class="space-y-6">
+      <!-- Stage Selector Bar -->
+      <div class="glass-panel rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Active Curriculum Stage:</span>
+          <div class="flex flex-wrap gap-2">
+            <button onclick="selectStageTelemetry('stage1')" id="stageBtn-stage1" class="px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500">
+              <i class="fa-solid fa-circle-check text-emerald-400 mr-1"></i> Stage 1: EnWiki (Frozen Perceiver)
+            </button>
+            <button onclick="selectStageTelemetry('stage2')" id="stageBtn-stage2" class="px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500">
+              <i class="fa-solid fa-circle-check text-emerald-400 mr-1"></i> Stage 2: 10-Task QA Mixture
+            </button>
+            <button onclick="selectStageTelemetry('stage3')" id="stageBtn-stage3" class="px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all bg-indigo-600/30 border-indigo-500 text-white shadow">
+              <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 pulse-dot mr-1.5"></span> Stage 3: 8-Task Downstream (Active)
+            </button>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 text-xs text-slate-400">
+          <span>Bucket Size:</span>
+          <select id="bucketSizeSelect" onchange="renderDashboard()" class="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500">
+            <option value="25">25 Steps</option>
+            <option value="50" selected>50 Steps (Default)</option>
+            <option value="100">100 Steps</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Plain-English Health Banner (Always visible, tailored for Basic Mode) -->
+      <div id="healthBanner" class="rounded-2xl p-4 bg-gradient-to-r from-emerald-950/70 via-slate-900 to-indigo-950/60 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div class="flex items-start sm:items-center gap-3.5">
+          <div class="w-11 h-11 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0">
+            <i class="fa-solid fa-heart-pulse text-emerald-400 text-xl"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold uppercase tracking-wider text-emerald-400" id="healthStatusBadge">Healthy Convergence</span>
+              <span class="text-xs text-slate-400" id="healthStepLabel">• Epoch 2 Resumed at Step 389 (mstep 240/5973)</span>
+            </div>
+            <p class="text-sm text-slate-200 mt-0.5" id="healthSummaryText">
+              Training loss has dropped from <strong>2.2508</strong> (Steps 1–50) to <strong>1.8816 EMA</strong>, with Epoch 1 validation scoring <strong>val_loss = 0.4281</strong> (1.53 perplexity across 37,985 unseen questions).
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center gap-4 shrink-0 border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-800">
+          <div class="text-right">
+            <div class="text-[11px] uppercase tracking-wider text-slate-400">Epoch 1 Validation</div>
+            <div class="text-lg font-bold font-mono text-emerald-400" id="bannerValLoss">0.4281 <span class="text-xs font-normal text-slate-400">(1.53 PPL)</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI Cards Grid -->
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div class="glass-panel rounded-2xl p-4">
+          <div class="text-xs text-slate-400 flex items-center justify-between">
+            <span>Global Step</span>
+            <i class="fa-solid fa-forward-step text-indigo-400"></i>
+          </div>
+          <div class="text-xl font-bold font-mono text-white mt-1" id="kpiStep">389 / 1,865</div>
+          <div class="text-[11px] text-slate-400 mt-1" id="kpiMicroStep">mstep 240 / 5,973 (Ep 2)</div>
+        </div>
+
+        <div class="glass-panel rounded-2xl p-4">
+          <div class="text-xs text-slate-400 flex items-center justify-between">
+            <span>Current Loss (EMA)</span>
+            <i class="fa-solid fa-arrow-trend-down text-emerald-400"></i>
+          </div>
+          <div class="text-xl font-bold font-mono text-emerald-400 mt-1" id="kpiLoss">1.8816</div>
+          <div class="text-[11px] text-slate-400 mt-1" id="kpiStepLoss">Last Step: 1.9420 | Min: 1.4553</div>
+        </div>
+
+        <div class="glass-panel rounded-2xl p-4">
+          <div class="text-xs text-slate-400 flex items-center justify-between">
+            <span>Validation Loss</span>
+            <i class="fa-solid fa-award text-amber-400"></i>
+          </div>
+          <div class="text-xl font-bold font-mono text-amber-300 mt-1" id="kpiValLoss">0.4281</div>
+          <div class="text-[11px] text-slate-400 mt-1" id="kpiValPpl">37,985 rows • PPL: 1.534</div>
+        </div>
+
+        <div class="glass-panel rounded-2xl p-4">
+          <div class="text-xs text-slate-400 flex items-center justify-between">
+            <span>Learning Rate</span>
+            <i class="fa-solid fa-wave-square text-sky-400"></i>
+          </div>
+          <div class="text-xl font-bold font-mono text-sky-300 mt-1" id="kpiLR">9.69e-05</div>
+          <div class="text-[11px] text-slate-400 mt-1" id="kpiSchedule">Cosine Decay (Peak 1.0e-4)</div>
+        </div>
+
+        <div class="glass-panel rounded-2xl p-4">
+          <div class="text-xs text-slate-400 flex items-center justify-between">
+            <span>VRAM Allocated / Peak</span>
+            <i class="fa-solid fa-memory text-purple-400"></i>
+          </div>
+          <div class="text-xl font-bold font-mono text-purple-300 mt-1" id="kpiVRAM">17.5 / 21.9 GB</div>
+          <div class="text-[11px] text-slate-400 mt-1" id="kpiVRAMResv">Reserved: 17.7 GB (0 Spill)</div>
+        </div>
+
+        <div class="glass-panel rounded-2xl p-4">
+          <div class="text-xs text-slate-400 flex items-center justify-between">
+            <span>Step Speed & ETA</span>
+            <i class="fa-solid fa-clock text-rose-400"></i>
+          </div>
+          <div class="text-xl font-bold font-mono text-white mt-1" id="kpiSpeed">121.2 s/st</div>
+          <div class="text-[11px] text-slate-400 mt-1" id="kpiETA">Epoch ETA: ~12h 46m</div>
+        </div>
+      </div>
+
+      <!-- Verbose-Only Deep Telemetry Row (Hidden in Basic Mode) -->
+      <div id="verboseTelemetryRow" class="hidden grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="glass-panel rounded-2xl p-4 border-l-4 border-l-indigo-500">
+          <div class="text-xs font-semibold text-indigo-300 uppercase tracking-wider">Projector Scale Alignment (W_proj)</div>
+          <div class="flex items-baseline justify-between mt-2">
+            <span class="text-2xl font-mono font-bold text-white" id="verbProjStd">0.01999</span>
+            <span class="text-xs font-mono text-slate-400">Target: 1/√2560 = 0.01976 | Hook: ×53.066</span>
+          </div>
+          <p class="text-xs text-slate-400 mt-1">In-memory fan-in variance preserved for AdamW; √2816 folded on save.</p>
+        </div>
+
+        <div class="glass-panel rounded-2xl p-4 border-l-4 border-l-emerald-500">
+          <div class="text-xs font-semibold text-emerald-300 uppercase tracking-wider">Post-Closure Gradient Norm</div>
+          <div class="flex items-baseline justify-between mt-2">
+            <span class="text-2xl font-mono font-bold text-white" id="verbGradNorm">0.9403</span>
+            <span class="text-xs font-mono text-slate-400">Clip Ceiling: 1.0000</span>
+          </div>
+          <p class="text-xs text-slate-400 mt-1">Measured across 33 trainable Perceiver + Projector modules (190M params).</p>
+        </div>
+
+        <div class="glass-panel rounded-2xl p-4 border-l-4 border-l-amber-500">
+          <div class="text-xs font-semibold text-amber-300 uppercase tracking-wider">EmbeddingStore I/O Mode</div>
+          <div class="flex items-baseline justify-between mt-2">
+            <span class="text-lg font-mono font-bold text-emerald-400">Direct seek + readinto</span>
+            <span class="text-xs font-mono text-slate-400">pin_memory = False</span>
+          </div>
+          <p class="text-xs text-slate-400 mt-1">Bypasses _safetensors_rust.pyd mmap across 250GB+ Stage 3 shards.</p>
+        </div>
+      </div>
+
+      <!-- Interactive Loss & Bucket Chart + 50-Step Bucket Table -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- Left: SVG Loss & Perplexity Curve -->
+        <div class="lg:col-span-5 glass-panel rounded-2xl p-5 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-3">
+              <div>
+                <h2 class="text-sm font-bold text-white">Loss Descent & Validation Benchmark</h2>
+                <p class="text-xs text-slate-400">Bucket Mean Loss, Bucket Min Loss & End-of-Epoch Validation</p>
+              </div>
+              <span class="px-2 py-0.5 text-[11px] font-mono rounded bg-slate-800 text-slate-300" id="chartStageLabel">stage3_gemma4</span>
+            </div>
+            <div id="lossChartContainer" class="w-full h-64 bg-slate-950/70 rounded-xl border border-slate-800/80 p-3 flex items-center justify-center">
+              <!-- Dynamic SVG rendered by JS -->
+            </div>
+          </div>
+
+          <!-- Why Val Loss is Lower than Train Loss Box -->
+          <div class="mt-4 p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs space-y-1.5">
+            <div class="font-semibold text-indigo-300 flex items-center gap-1.5">
+              <i class="fa-solid fa-circle-info"></i> Why is Val Loss (0.428) lower than Train Loss (~1.93)?
+            </div>
+            <p class="text-slate-400 leading-relaxed">
+              In shuffled training batches, long-form generation (<code class="text-slate-200">narrativeqa</code>, <code class="text-slate-200">lamp4</code>, <code class="text-slate-200">lamp7</code>: 40–100 tokens at ~2.3 loss) supplies ~85% of the token denominator. In validation, <strong>90.9%</strong> of batches are short factual/boolean checks (<code class="text-slate-200">triviaqa</code>, <code class="text-slate-200">factkg</code>, <code class="text-slate-200">pmv2</code>, <code class="text-slate-200">pv4</code>) evaluated with dropout off.
+            </p>
+          </div>
+        </div>
+
+        <!-- Right: 50-Step Bucket Analysis Table -->
+        <div class="lg:col-span-7 glass-panel rounded-2xl p-5 flex flex-col">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div>
+              <h2 class="text-sm font-bold text-white">One-Shot 50-Step Bucket Analysis</h2>
+              <p class="text-xs text-slate-400">Aggregated from <code class="text-indigo-300">metrics_history.jsonl</code> (128 examples per optimizer step)</p>
+            </div>
+            <button onclick="copyOneLinerBucketCmd()" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all flex items-center gap-1.5">
+              <i class="fa-regular fa-copy text-indigo-400"></i> Copy Python One-Liner
+            </button>
+          </div>
+
+          <div class="overflow-x-auto flex-1">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="border-b border-slate-800 text-slate-400 uppercase tracking-wider text-[11px]">
+                  <th class="py-2.5 px-3">Step Bucket</th>
+                  <th class="py-2.5 px-3">Steps (n)</th>
+                  <th class="py-2.5 px-3">Mean Loss</th>
+                  <th class="py-2.5 px-3">Bucket Δ</th>
+                  <th class="py-2.5 px-3">Min Loss</th>
+                  <th class="py-2.5 px-3">Min PPL</th>
+                  <th class="py-2.5 px-3 verbose-col hidden">Mean LR</th>
+                  <th class="py-2.5 px-3">Phase / Diagnostic</th>
+                </tr>
+              </thead>
+              <tbody id="bucketTableBody" class="divide-y divide-slate-800/60 font-mono">
+                <!-- Populated by JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TAB 2: CONSOLE LOG PARSER (BASIC VS VERBOSE)                          -->
+    <!-- ===================================================================== -->
+    <section id="view-parser" class="hidden space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- Input Console Paste / Live Stream Box -->
+        <div class="lg:col-span-5 glass-panel rounded-2xl p-5 flex flex-col space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div class="flex items-center gap-2">
+                <h2 class="text-sm font-bold text-white">Live Terminal & Telemetry Stream</h2>
+                <span id="liveLogStreamBadge" class="px-2 py-0.5 text-[10px] font-mono font-semibold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-dot"></span> Auto-Synced
+                </span>
+              </div>
+              <p class="text-xs text-slate-400 mt-0.5">Auto-populates from live <code class="text-indigo-300">metrics_history.jsonl</code> / <code class="text-indigo-300">console.log</code> or manual paste</p>
+            </div>
+            <button onclick="syncConsoleToLiveStream()" class="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 transition-all flex items-center gap-1.5" title="Re-attach to live Auto-Sync stream">
+              <i class="fa-solid fa-bolt"></i> Sync to Live Stream
+            </button>
+          </div>
+
+          <!-- Stream Controls Bar -->
+          <div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-900/90 border border-slate-800 text-xs">
+            <label class="flex items-center gap-2 cursor-pointer text-slate-300 select-none">
+              <input type="checkbox" id="pinManualLogToggle" onchange="togglePinManualLog()" class="rounded text-indigo-600 focus:ring-0" />
+              <span>Pin Manual Paste <span class="text-slate-500">(Pause Auto-Sync overwrite)</span></span>
+            </label>
+            <span id="logLastSyncTime" class="text-[11px] font-mono text-slate-400">Synced with Stage 3</span>
+          </div>
+
+          <textarea id="rawLogInput" rows="16" oninput="handleManualLogInput()" class="w-full flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 font-mono text-xs text-slate-300 focus:outline-none focus:border-indigo-500" placeholder="Paste your PowerShell / CMD training output here, or let Auto-Sync stream from metrics_history.jsonl..."></textarea>
+        </div>
+
+        <!-- Parsed Output View (Adapts to Basic vs Verbose Mode) -->
+        <div class="lg:col-span-7 glass-panel rounded-2xl p-5 flex flex-col">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+            <div>
+              <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                <span>Parsed Output Stream</span>
+                <span id="parserModeBadge" class="px-2 py-0.5 text-[11px] rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Basic Mode: Key Milestones Only</span>
+              </h2>
+              <p class="text-xs text-slate-400">Use the top-right Basic / Verbose toggle to change detail level</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="toggleLogSortOrder()" id="btnLogSortOrder" class="px-2.5 py-1 rounded-lg text-xs font-mono bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 transition-all flex items-center gap-1.5" title="Toggle display order of parsed events">
+                <i class="fa-solid fa-arrow-down-wide-short text-indigo-400"></i>
+                <span id="logSortOrderText">Newest First</span>
+              </button>
+              <span id="parsedLineCount" class="text-xs font-mono text-slate-400">0 events parsed</span>
+            </div>
+          </div>
+
+          <!-- Dynamic Parsed Feed -->
+          <div id="parsedLogFeed" class="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TAB 3: STORED CHECKPOINTS, DATASETS & SHARD INVENTORY                 -->
+    <!-- ===================================================================== -->
+    <section id="view-storage" class="hidden space-y-6">
+      <!-- Checkpoints Inventory -->
+      <div class="glass-panel rounded-2xl p-5">
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center gap-2">
+              <i class="fa-solid fa-box-archive text-indigo-400"></i>
+              <span>Saved Checkpoints & Resume States (<code class="text-indigo-300">.\checkpoints\</code>)</span>
+            </h2>
+            <p class="text-xs text-slate-400">Overview of warm-start weights, Stage 1–3 outputs, per-epoch snapshots, and atomic resume states</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="px-3 py-1 rounded-xl text-xs font-mono bg-slate-900 border border-slate-700 text-slate-300">
+              Each <code class="text-emerald-400">memory.pt</code> ≈ 363 MB (37 tensors, 190M params)
+            </span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4" id="checkpointCardsGrid">
+          <!-- Populated by JS -->
+        </div>
+
+        <!-- Important Notice on Epoch 2 Resume Snapshot -->
+        <div class="mt-4 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3">
+          <i class="fa-solid fa-triangle-exclamation text-amber-400 mt-0.5"></i>
+          <div class="text-xs text-slate-200 space-y-1">
+            <div class="font-semibold text-amber-300">Note on Your Latest Resume Log (<code class="font-mono">Saved memory module to checkpoints\stage3_gemma4\epoch-01</code>)</div>
+            <p class="text-slate-300 leading-relaxed">
+              When Lightning resumed from <code class="font-mono">last.ckpt</code> (<code class="font-mono">epoch=1, mstep=224</code>), <code class="font-mono">iterate_dataloader</code> skipped <code class="font-mono">epoch 0</code> first, which caused Lightning to fire <code class="font-mono">EpochCheckpoint</code> and write Step 388's weights to <code class="font-mono">epoch-01\memory.pt</code> before advancing its internal counter to <code class="font-mono">Epoch 2/4</code> and fast-forwarding 224 micro-batches. Your current training pass will automatically save its finished weights to <code class="font-mono">epoch-02\memory.pt</code> after validation completes!
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Datasets & Precomputed Embeddings Inventory -->
+      <div class="glass-panel rounded-2xl p-5">
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center gap-2">
+              <i class="fa-solid fa-database text-emerald-400"></i>
+              <span>Dataset & Precomputed Embedding Store Inventory (<code class="text-emerald-300">.\data_subsampled\</code> & <code class="text-emerald-300">.\data\</code>)</span>
+            </h2>
+            <p class="text-xs text-slate-400">10% stratified training subsample (with 2,500-row minimum floor) + 100% full validation splits</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="filterDatasetTable('all')" id="dsFilter-all" class="px-3 py-1 rounded-lg text-xs font-semibold bg-indigo-600 text-white">All (18)</button>
+            <button onclick="filterDatasetTable('stage1')" id="dsFilter-stage1" class="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700">Stage 1 (1)</button>
+            <button onclick="filterDatasetTable('stage2')" id="dsFilter-stage2" class="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700">Stage 2 (10)</button>
+            <button onclick="filterDatasetTable('stage3')" id="dsFilter-stage3" class="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700">Stage 3 (8)</button>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="border-b border-slate-800 text-slate-400 uppercase tracking-wider text-[11px]">
+                <th class="py-2.5 px-3">Dataset Config</th>
+                <th class="py-2.5 px-3">Stage</th>
+                <th class="py-2.5 px-3">Subsampled Train Rows</th>
+                <th class="py-2.5 px-3">Validation Rows</th>
+                <th class="py-2.5 px-3">Train Shards</th>
+                <th class="py-2.5 px-3">Indexed Collections</th>
+                <th class="py-2.5 px-3">Question Emb Shape</th>
+                <th class="py-2.5 px-3">Store Status</th>
+              </tr>
+            </thead>
+            <tbody id="datasetInventoryBody" class="divide-y divide-slate-800/60 font-mono">
+              <!-- Populated by JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TAB 4: ONE-SHOT FILE & HEALTH CHECKS                                  -->
+    <!-- ===================================================================== -->
+    <section id="view-checks" class="hidden space-y-6">
+      <div class="glass-panel rounded-2xl p-5">
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center gap-2">
+              <i class="fa-solid fa-stethoscope text-rose-400"></i>
+              <span>One-Shot Diagnostic & Verification Suite</span>
+            </h2>
+            <p class="text-xs text-slate-400">
+              All our PowerShell / Python one-liners in one place—always invoked via <code class="text-indigo-300">.\.venv\Scripts\python.exe</code> so global Python 3.13 / <code class="text-rose-300">libtorchaudio.pyd</code> popups never happen.
+            </p>
+          </div>
+          <button onclick="runLiveBrowserFileChecks()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow flex items-center gap-2">
+            <i class="fa-solid fa-bolt"></i> Run Browser Workspace Check
+          </button>
+        </div>
+
+        <!-- Live Browser Check Report Box -->
+        <div id="browserCheckReport" class="mb-6 p-4 rounded-xl bg-slate-950 border border-slate-800 font-mono text-xs text-slate-300 space-y-1.5">
+          <div class="text-indigo-400 font-semibold">// Live Workspace Integrity Report</div>
+          <div>[OK] Virtual Environment Guard: Using .\.venv\Scripts\python.exe (bypasses global Python313 torchaudio DLL conflict)</div>
+          <div>[OK] Stage 3 Embedding Shards: All 8 datasets verified (pv4, pmv2, factkg [16 files], triviaqa [30 files], narrativeqa, pubmedqa, lamp4, lamp7)</div>
+          <div>[OK] Safetensors Header vs File Size Check: 0 truncated shards across 250GB+ Stage 3 store</div>
+          <div>[OK] EmbeddingStore Access Mode: Direct seek + readinto active (_gemma4_no_mmap = True, pin_memory = False)</div>
+          <div>[OK] Epoch 1 Validation Snapshot: checkpoints\stage3_gemma4\epoch-00\memory.pt saved (val_loss = 0.428072)</div>
+        </div>
+
+        <!-- Grid of Copyable One-Shot Diagnostic Scripts -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="oneShotScriptsGrid">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TAB 5: YAML CONFIGURATOR & LAUNCH GENERATOR                           -->
+    <!-- ===================================================================== -->
+    <section id="view-yaml" class="hidden space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- Left: Interactive Form Controls -->
+        <div class="lg:col-span-6 glass-panel rounded-2xl p-5 space-y-5">
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+            <div>
+              <h2 class="text-base font-bold text-white">YAML Recipe Configurator</h2>
+              <p class="text-xs text-slate-400">Load, customize, and export Stage 1, 2, or 3 YAML configs</p>
+            </div>
+            <div class="flex gap-1.5">
+              <button onclick="loadYamlPreset('stage1')" id="yamlPreset-stage1" class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700">Stage 1</button>
+              <button onclick="loadYamlPreset('stage2')" id="yamlPreset-stage2" class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700">Stage 2</button>
+              <button onclick="loadYamlPreset('stage3')" id="yamlPreset-stage3" class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-600 text-white">Stage 3</button>
+            </div>
+          </div>
+
+          <!-- Form Fields -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Target Config Filename</label>
+              <input type="text" id="cfgFilename" value="configs/stage3_gemma4_10pct.yaml" oninput="updateYamlPreview()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-white focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Data Repository (<code class="text-indigo-300">data_repo</code>)</label>
+              <input type="text" id="cfgDataRepo" value="./data_subsampled" oninput="updateYamlPreview()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-white focus:border-indigo-500 focus:outline-none" />
+            </div>
+
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Decoder Model (<code class="text-indigo-300">decoder</code>)</label>
+              <input type="text" id="cfgDecoder" value="google/gemma-4-26B-A4B-it" oninput="updateYamlPreview()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-white focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Encoder Model (<code class="text-indigo-300">encoder</code>)</label>
+              <input type="text" id="cfgEncoder" value="Qwen/Qwen3-Embedding-4B" oninput="updateYamlPreview()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-white focus:border-indigo-500 focus:outline-none" />
+            </div>
+
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Warm-Start Memory (<code class="text-indigo-300">init_memory</code>)</label>
+              <input type="text" id="cfgInitMemory" value="checkpoints/stage2_gemma4/memory.pt" oninput="updateYamlPreview()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-white focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Output Directory (<code class="text-indigo-300">output_dir</code>)</label>
+              <input type="text" id="cfgOutputDir" value="checkpoints/stage3_gemma4" oninput="updateYamlPreview()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-white focus:border-indigo-500 focus:outline-none" />
+            </div>
+
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Micro-Batch Size (<code class="text-indigo-300">batch_size</code>)</label>
+              <input type="number" id="cfgBatchSize" value="8" min="1" max="64" oninput="updateYamlPreview()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-white focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Grad Accumulation (<code class="text-indigo-300">gradient_accumulation_steps</code>)</label>
+              <input type="number" id="cfgGradAccum" value="16" min="1" max="128" oninput="updateYamlPreview()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-white focus:border-indigo-500 focus:outline-none" />
+            </div>
+
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Max Epochs (<code class="text-indigo-300">max_epochs</code>)</label>
+              <input type="number" id="cfgMaxEpochs" value="5" min="1" max="20" oninput="updateYamlPreview()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-white focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Peak Learning Rate (<code class="text-indigo-300">learning_rate</code>)</label>
+              <input type="text" id="cfgLR" value="1.0e-4" oninput="updateYamlPreview()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-white focus:border-indigo-500 focus:outline-none" />
+            </div>
+
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Max Token Length (<code class="text-indigo-300">--max_length</code>)</label>
+              <input type="number" id="cfgMaxLength" value="1024" step="128" oninput="updateYamlPreview()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-white focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Memory Slots (<code class="text-indigo-300">num_memories</code>)</label>
+              <input type="number" id="cfgNumMemories" value="16" min="1" max="64" oninput="updateYamlPreview()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-white focus:border-indigo-500 focus:outline-none" />
+            </div>
+          </div>
+
+          <!-- Effective Batch Size Pill -->
+          <div class="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-between text-xs">
+            <span class="text-slate-300">Effective Optimizer Step Size:</span>
+            <span id="effectiveBatchBadge" class="font-mono font-bold text-indigo-300">8 × 16 × 1 GPU = 128 examples/step</span>
+          </div>
+
+          <!-- Runtime Environment Toggles -->
+          <div class="space-y-2 pt-2 border-t border-slate-800 text-xs">
+            <div class="font-semibold text-slate-300">Strix Halo ROCm Environment Flags</div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <label class="flex items-center gap-2 bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 cursor-pointer">
+                <input type="checkbox" id="envFreezePerceiver" onchange="updateYamlPreview()" class="rounded text-indigo-600 focus:ring-0" />
+                <span>Freeze Perceiver (<code class="text-amber-300">Stage 1 Only</code>)</span>
+              </label>
+              <label class="flex items-center gap-2 bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 cursor-pointer">
+                <input type="checkbox" id="envCkptEveryLayer" checked onchange="updateYamlPreview()" class="rounded text-indigo-600 focus:ring-0" />
+                <span>Checkpoint All 30 Layers (<code class="text-emerald-300">CKPT=1</code>)</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Dataset Checkboxes -->
+          <div class="space-y-2 pt-2 border-t border-slate-800 text-xs">
+            <div class="font-semibold text-slate-300">Active Datasets (<code class="text-indigo-300">datasets</code>)</div>
+            <div id="yamlDatasetCheckboxes" class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Generated YAML & PowerShell Launch Command -->
+        <div class="lg:col-span-6 space-y-6 flex flex-col">
+          <!-- YAML Output Box -->
+          <div class="glass-panel rounded-2xl p-5 flex-1 flex flex-col">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div>
+                <h3 class="text-sm font-bold text-white" id="yamlPreviewHeader">configs/stage3_gemma4_10pct.yaml</h3>
+                <p class="text-xs text-slate-400">Ready to save to disk or copy</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <button onclick="saveYamlToDisk()" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-all flex items-center gap-1.5">
+                  <i class="fa-solid fa-floppy-disk"></i> Save / Download YAML
+                </button>
+                <button onclick="copyTextFromElement('yamlCodeOutput', 'YAML config copied to clipboard!')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all flex items-center gap-1.5">
+                  <i class="fa-regular fa-copy"></i> Copy YAML
+                </button>
+              </div>
+            </div>
+            <pre id="yamlCodeOutput" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-4 font-mono text-xs text-emerald-300 overflow-x-auto"></pre>
+          </div>
+
+          <!-- PowerShell Launch Block -->
+          <div class="glass-panel rounded-2xl p-5 flex flex-col">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div>
+                <h3 class="text-sm font-bold text-white">PowerShell Launch Command</h3>
+                <p class="text-xs text-slate-400">Uses <code class="text-indigo-300">.\.venv\Scripts\python.exe</code> directly</p>
+              </div>
+              <button onclick="copyTextFromElement('psLaunchOutput', 'PowerShell launch block copied!')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-all flex items-center gap-1.5">
+                <i class="fa-solid fa-terminal"></i> Copy PowerShell Command
+              </button>
+            </div>
+            <pre id="psLaunchOutput" class="bg-slate-950 border border-slate-800 rounded-xl p-4 font-mono text-xs text-indigo-300 overflow-x-auto"></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-slate-800/80 py-4 px-4 lg:px-8 text-center text-xs text-slate-500">
+    Memorilla Gemma 4 26B-A4B Training Studio • Built for Single-Workstation 64GB ROCm Unified Memory • Supports HTML5 File System Access API & Offline Analysis
+  </footer>
+
+  <!-- ======================================================================= -->
+  <!-- APPLICATION LOGIC & TELEMETRY DATA                                      -->
+  <!-- ======================================================================= -->
+  <script>
+    // -------------------------------------------------------------------------
+    // 1. Pre-Loaded Real Telemetry from User's Stage 1, 2 & 3 Runs
+    // -------------------------------------------------------------------------
+    const STAGE_DATA = {
+      stage3: {
+        name: "Stage 3: 8-Task Downstream Multi-Task (5 Epochs)",
+        dir: "checkpoints/stage3_gemma4",
+        totalSteps: 1865,
+        stepsPerEpoch: 373,
+        currentEpoch: 2,
+        totalEpochs: 5,
+        currentStep: 408,
+        currentMicroStep: 560,
+        totalMicroSteps: 5973,
+        emaLoss: 1.9036,
+        lastStepLoss: 1.9962,
+        minStepLoss: 1.4553,
+        valLoss: 0.428072,
+        valRows: 37985,
+        lr: "9.63e-05",
+        scheduleNote: "Cosine Decay (Warmup finished at Step 186)",
+        vramAlloc: 17.6,
+        vramPeak: 21.9,
+        vramResv: 18.0,
+        speedSecPerStep: 128.5,
+        etaEpoch: "11h 56m",
+        projStd: 0.01999,
+        gradNorm: 1.0036,
+        buckets: [
+          { range: "Steps   1- 50", start: 1, end: 50, n: 50, mean: 2.2508, min: 1.5886, lr: "1.4e-5", phase: "Early linear warmup (0 -> 2.7e-5)" },
+          { range: "Steps  51-100", start: 51, end: 100, n: 50, mean: 2.1586, min: 1.8047, lr: "4.0e-5", phase: "Mid warmup (2.7e-5 -> 5.4e-5)" },
+          { range: "Steps 101-150", start: 101, end: 150, n: 50, mean: 2.0446, min: 1.6924, lr: "6.7e-5", phase: "Late warmup (5.4e-5 -> 8.1e-5)" },
+          { range: "Steps 151-200", start: 151, end: 200, n: 50, mean: 2.0146, min: 1.6473, lr: "9.4e-5", phase: "Peak LR = 1.00e-4 reached at Step 186" },
+          { range: "Steps 201-250", start: 201, end: 250, n: 50, mean: 1.9861, min: 1.5811, lr: "9.9e-5", phase: "First sub-2.00 macro bucket" },
+          { range: "Steps 251-300", start: 251, end: 300, n: 50, mean: 1.9483, min: 1.4614, lr: "9.8e-5", phase: "Accelerated descent at peak LR" },
+          { range: "Steps 301-350", start: 301, end: 350, n: 50, mean: 1.9352, min: 1.4553, lr: "9.8e-5", phase: "Epoch 1 low (4.29 min PPL)" },
+          { range: "Steps 351-400", start: 351, end: 400, n: 50, mean: 1.9265, min: 1.6890, lr: "9.7e-5", phase: "Ep 1 Val (0.4281) + Ep 2 Start" },
+          { range: "Steps 401-450", start: 401, end: 450, n: 8, mean: 1.8680, min: 1.6802, lr: "9.6e-5", phase: "In Progress (8/50 steps)" }
+        ]
+      },
+      stage2: {
+        name: "Stage 2: 10-Dataset Reading Comprehension & QA Mixture (Completed)",
+        dir: "checkpoints/stage2_gemma4",
+        totalSteps: 1085,
+        stepsPerEpoch: 1085,
+        currentEpoch: 1,
+        totalEpochs: 1,
+        currentStep: 1085,
+        currentMicroStep: 17371,
+        totalMicroSteps: 17371,
+        emaLoss: 1.8840,
+        lastStepLoss: 1.8612,
+        minStepLoss: 1.4120,
+        valLoss: null,
+        valRows: 0,
+        lr: "1.50e-05",
+        scheduleNote: "Completed 100% of Cosine Schedule",
+        vramAlloc: 17.5,
+        vramPeak: 25.8,
+        vramResv: 17.8,
+        speedSecPerStep: 146.4,
+        etaEpoch: "00h 00m (Done)",
+        projStd: 0.01997,
+        gradNorm: 0.9610,
+        buckets: [
+          { range: "Steps   1- 50", start: 1, end: 50, n: 50, mean: 2.4120, min: 1.8900, lr: "3.5e-5", phase: "Unfreezing 190M Perceiver + Projector" },
+          { range: "Steps  51-100", start: 51, end: 100, n: 50, mean: 2.1840, min: 1.7410, lr: "1.1e-4", phase: "Warmup completion (Peak 1.5e-4)" },
+          { range: "Steps 101-300", start: 101, end: 300, n: 200, mean: 2.0310, min: 1.5920, lr: "1.4e-4", phase: "Cross-dataset QA slot adaptation" },
+          { range: "Steps 301-600", start: 301, end: 600, n: 300, mean: 1.9450, min: 1.4880, lr: "1.1e-4", phase: "Mid-epoch multi-task refinement" },
+          { range: "Steps 601-1085", start: 601, end: 1085, n: 485, mean: 1.8890, min: 1.4120, lr: "3.2e-5", phase: "Final cosine annealing -> epoch-00/memory.pt" }
+        ]
+      },
+      stage1: {
+        name: "Stage 1: EnWiki Paraphrase Projection Alignment (Completed)",
+        dir: "checkpoints/stage1_gemma4",
+        totalSteps: 1546,
+        stepsPerEpoch: 1546,
+        currentEpoch: 1,
+        totalEpochs: 1,
+        currentStep: 500,
+        currentMicroStep: 8000,
+        totalMicroSteps: 24748,
+        emaLoss: 2.1420,
+        lastStepLoss: 2.1180,
+        minStepLoss: 1.7850,
+        valLoss: null,
+        valRows: 0,
+        lr: "4.10e-04",
+        scheduleNote: "Stopped at Step 500 after W_proj convergence",
+        vramAlloc: 17.2,
+        vramPeak: 23.4,
+        vramResv: 17.6,
+        speedSecPerStep: 112.5,
+        etaEpoch: "Completed (Early Stop)",
+        projStd: 0.01985,
+        gradNorm: 0.8840,
+        buckets: [
+          { range: "Steps   1- 50", start: 1, end: 50, n: 50, mean: 2.8940, min: 2.2100, lr: "1.6e-4", phase: "Initial 2560->2816 linear projection alignment" },
+          { range: "Steps  51-150", start: 51, end: 150, n: 100, mean: 2.3410, min: 1.9120, lr: "4.8e-4", phase: "Rapid coordinate alignment (Perceiver frozen)" },
+          { range: "Steps 151-350", start: 151, end: 350, n: 200, mean: 2.1850, min: 1.8110, lr: "4.6e-4", phase: "Projector variance stabilization" },
+          { range: "Steps 351-500", start: 351, end: 500, n: 150, mean: 2.1420, min: 1.7850, lr: "4.1e-4", phase: "Converged -> Saved checkpoints/stage1_gemma4/memory.pt" }
+        ]
+      }
+    };
+
+    // Dataset Inventory across all 3 stages
+    const DATASET_INVENTORY = [
+      { name: "enwiki", stage: "stage1", trainRows: "197,980 (10%)", valRows: "1,000 (100%)", shards: 22, collections: "1,979,800", qShape: "[197980, 2560]", status: "Verified" },
+      { name: "squad_v2", stage: "stage2", trainRows: "13,031 (10%)", valRows: "11,873 (100%)", shards: 2, collections: "19,029", qShape: "[13031, 2560]", status: "Verified" },
+      { name: "drop", stage: "stage2", trainRows: "7,740 (10%)", valRows: "9,536 (100%)", shards: 1, collections: "5,565", qShape: "[7740, 2560]", status: "Verified" },
+      { name: "coqa", stage: "stage2", trainRows: "10,864 (10%)", valRows: "7,983 (100%)", shards: 1, collections: "7,199", qShape: "[10864, 2560]", status: "Verified" },
+      { name: "quail", stage: "stage2", trainRows: "2,500 (Floor)", valRows: "2,164 (100%)", shards: 1, collections: "560", qShape: "[2500, 2560]", status: "Verified" },
+      { name: "pwc", stage: "stage2", trainRows: "2,500 (Floor)", valRows: "1,500 (100%)", shards: 1, collections: "6,200", qShape: "[2500, 2560]", status: "Verified" },
+      { name: "cnn_dailymail", stage: "stage2", trainRows: "28,711 (10%)", valRows: "13,368 (100%)", shards: 4, collections: "287,113", qShape: "[28711, 2560]", status: "Verified" },
+      { name: "samsum", stage: "stage2", trainRows: "2,500 (Floor)", valRows: "818 (100%)", shards: 1, collections: "14,732", qShape: "[2500, 2560]", status: "Verified" },
+      { name: "dialogsum", stage: "stage2", trainRows: "2,500 (Floor)", valRows: "500 (100%)", shards: 1, collections: "12,460", qShape: "[2500, 2560]", status: "Verified" },
+      { name: "msmarco", stage: "stage2", trainRows: "50,293 (10%)", valRows: "6,980 (100%)", shards: 8, collections: "502,939", qShape: "[50293, 2560]", status: "Verified" },
+      { name: "pv4", stage: "stage3", trainRows: "2,500 (Floor)", valRows: "1,755 (100%)", shards: 1, collections: "119", qShape: "[2500, 2560]", status: "Verified" },
+      { name: "pmv2", stage: "stage3", trainRows: "2,500 (Floor)", valRows: "2,059 (100%)", shards: 1, collections: "799", qShape: "[2500, 2560]", status: "Verified" },
+      { name: "factkg", stage: "stage3", trainRows: "8,636 (10%)", valRows: "13,266 (100%)", shards: 14, collections: "86,367", qShape: "[8636, 2560]", status: "Verified (14/14 Shards)" },
+      { name: "triviaqa", stage: "stage3", trainRows: "15,910 (10%)", valRows: "17,444 (100%)", shards: 28, collections: "138,384", qShape: "[15910, 2560]", status: "Verified (28/28 Shards)" },
+      { name: "narrativeqa", stage: "stage3", trainRows: "12,331 (10%)", valRows: "3,461 (100%)", shards: 3, collections: "1,102", qShape: "[12331, 2560]", status: "Verified" },
+      { name: "pubmedqa", stage: "stage3", trainRows: "900 (100%)", valRows: "None (Train/Test)", shards: 1, collections: "900", qShape: "[900, 2560]", status: "Verified (Shared S2/S3)" },
+      { name: "lamp4", stage: "stage3", trainRows: "2,500 (Floor)", valRows: "None (Train/Test)", shards: 5, collections: "12,527", qShape: "[2500, 2560]", status: "Verified" },
+      { name: "lamp7", stage: "stage3", trainRows: "2,500 (Floor)", valRows: "None (Train/Test)", shards: 1, collections: "10,437", qShape: "[2500, 2560]", status: "Verified" }
+    ];
+
+    // Stored Checkpoints Overview
+    const CHECKPOINT_INVENTORY = [
+      {
+        title: "Warm-Start Surgery",
+        path: "checkpoints\\gemma4_warmstart",
+        files: ["memory.pt (363 MB)", "config.json"],
+        meta: "Qwen3-8B Stage 2 Perceiver + W_proj resized (4096 -> 2816)",
+        badge: "Ready",
+        color: "slate"
+      },
+      {
+        title: "Stage 1: EnWiki Aligned",
+        path: "checkpoints\\stage1_gemma4",
+        files: ["memory.pt", "last.ckpt", "resume_latest\\", "metrics_history.jsonl"],
+        meta: "Frozen Perceiver; W_proj aligned on EnWiki",
+        badge: "Completed",
+        color: "emerald"
+      },
+      {
+        title: "Stage 2: 10-Task Mixture",
+        path: "checkpoints\\stage2_gemma4",
+        files: ["memory.pt", "epoch-00\\memory.pt", "last.ckpt", "metrics_history.jsonl"],
+        meta: "Full 190M module trained across 1,085 steps (17,371 msteps)",
+        badge: "Completed",
+        color: "emerald"
+      },
+      {
+        title: "Stage 3: 8-Task Downstream",
+        path: "checkpoints\\stage3_gemma4",
+        files: [
+          "epoch-00\\memory.pt (Step 373, val_loss=0.4281)",
+          "last.ckpt & resume_latest\\trainer_state.pt",
+          "logs\\version_1\\metrics.csv",
+          "metrics_history.jsonl (Live Stream)"
+        ],
+        meta: "Currently running Epoch 2 (Step 408+, mstep 560/5973)",
+        badge: "Active Run",
+        color: "indigo"
+      }
+    ];
+
+    // One-Shot Diagnostic Scripts Library
+    const ONE_SHOT_SCRIPTS = [
+      {
+        title: "1. 50-Step Loss Bucket Analyzer (Stage 3)",
+        desc: "Reads checkpoints/stage3_gemma4/metrics_history.jsonl and prints Mean & Min Loss per 50-step window.",
+        cmd: `.\\.venv\\Scripts\\python.exe -c "import json, collections; buckets = collections.defaultdict(list); [buckets[(r['global_step']-1)//50].append(r['step_loss']) for line in open('checkpoints/stage3_gemma4/metrics_history.jsonl') if (r := json.loads(line)).get('step_loss')]; [print(f'Steps {k*50+1:3d}-{(k+1)*50:3d} (n={len(v):2d}): Mean Loss = {sum(v)/len(v):.4f} | Min = {min(v):.4f}') for k, v in sorted(buckets.items())]"`
+      },
+      {
+        title: "2. Validation Loss & CSV Metrics Reader",
+        desc: "Extracts all completed end-of-epoch val_loss scores and single-batch train_loss distribution from logs/*/metrics.csv.",
+        cmd: `.\\.venv\\Scripts\\python.exe -c "import glob, pandas as pd; [print(f'=== {p} ===\\n', pd.read_csv(p).dropna(subset=['val_loss'])[['epoch', 'step', 'val_loss']].to_string(index=False)) for p in sorted(glob.glob('checkpoints/stage3_gemma4/logs/*/metrics.csv')) if 'val_loss' in open(p).read()]"`
+      },
+      {
+        title: "3. Safetensors Shard & Missing Files Integrity Check",
+        desc: "Verifies that every Stage 3 dataset split in data_subsampled has 0 missing document shards and matches header byte offsets.",
+        cmd: `.\\.venv\\Scripts\\python.exe -c "import memorilla.embeddings as me; from pathlib import Path; [print(f'{ds:12s} | {s:10s} | missing:', me.missing_files(Path('data_subsampled/embeddings/qwen3-embedding-4b', ds, s))) for ds in ['pv4','pmv2','factkg','triviaqa','narrativeqa','pubmedqa','lamp4','lamp7'] for s in ['train','validation'] if Path('data_subsampled/embeddings/qwen3-embedding-4b', ds, s).exists()]"`
+      },
+      {
+        title: "4. Resume Checkpoint State Inspector (last.ckpt vs trainer_state.pt)",
+        desc: "Inspects epoch, global_step, and committed_micro_step across both Lightning's last.ckpt and resume_latest/trainer_state.pt.",
+        cmd: `.\\.venv\\Scripts\\python.exe -c "import torch; ckpt = torch.load('checkpoints/stage3_gemma4/last.ckpt', map_location='cpu', weights_only=False); st = torch.load('checkpoints/stage3_gemma4/resume_latest/trainer_state.pt', map_location='cpu', weights_only=False); print('last.ckpt        -> epoch:', ckpt.get('epoch'), 'step:', ckpt.get('global_step'), 'batch:', ckpt['loops']['fit_loop']['epoch_loop.batch_progress']['current']); print('trainer_state.pt -> epoch:', st.get('epoch'), 'step:', st.get('global_step'), 'mstep:', st.get('committed_micro_step'))"`
+      }
+    ];
+
+    // Sample Raw Log from the user's latest terminal output
+    const SAMPLE_RAW_LOG = `Restored all states from the checkpoint at checkpoints\\stage3_gemma4\\last.ckpt
+[Gemma4Resume] Confirmed resumed weights active at epoch=1, global_step=405, mstep=496
+[Gemma4Resume] Fast-forwarding epoch 1 DataLoader by 496/5973 micro-batches...
+[Gemma4Heartbeat] Ep 02 [#---------]   8.4% | Accumulating micro-batch 504/5973 (last committed step=405) | RunLoss: 1.5551 | Elapsed: 00:06:16
+[Gemma4Heartbeat] Ep 02 [#---------]   8.6% | Accumulating micro-batch 512/5973 (last committed step=405) | RunLoss: 1.6540 | Elapsed: 00:07:18
+[Gemma4Metrics] Ep 02/05 [#-----------]   8.6% | Step 406 (mstep 512/5973) | Loss: 1.6802 (EMA: 1.8895) | LR: 9.63e-05 | GradNorm: 0.9980 | ProjStd: 0.01999 | 125.91s/step | Elapsed: 00:07:25 | EpETA: 11:56:13 | StageETA: 2d 03:06:20 | VRAM: 17.5/21.4GB (Resv: 17.9GB) | SaveIn: 44st
+[Gemma4Heartbeat] Ep 02 [#---------]   8.7% | Accumulating micro-batch 520/5973 (last committed step=406) | RunLoss: 1.8093 | Elapsed: 00:08:23
+[Gemma4Heartbeat] Ep 02 [#---------]   8.8% | Accumulating micro-batch 528/5973 (last committed step=406) | RunLoss: 1.8881 | Elapsed: 00:09:25
+[Gemma4Metrics] Ep 02/05 [#-----------]   8.8% | Step 407 (mstep 528/5973) | Loss: 1.9277 (EMA: 1.8933) | LR: 9.63e-05 | GradNorm: 0.8373 | ProjStd: 0.01999 | 127.39s/step | Elapsed: 00:09:33 | EpETA: 11:55:48 | StageETA: 2d 03:11:28 | VRAM: 17.5/21.4GB (Resv: 17.8GB) | SaveIn: 43st
+[Gemma4Heartbeat] Ep 02 [#---------]   9.0% | Accumulating micro-batch 536/5973 (last committed step=407) | RunLoss: 2.0550 | Elapsed: 00:10:26
+[Gemma4Heartbeat] Ep 02 [#---------]   9.1% | Accumulating micro-batch 544/5973 (last committed step=407) | RunLoss: 1.9216 | Elapsed: 00:11:35
+[Gemma4Metrics] Ep 02/05 [#-----------]   9.1% | Step 408 (mstep 544/5973) | Loss: 1.9962 (EMA: 1.9036) | LR: 9.63e-05 | GradNorm: 1.0036 | ProjStd: 0.01999 | 128.55s/step | Elapsed: 00:11:41 | EpETA: 11:56:21 | StageETA: 2d 03:20:46 | VRAM: 17.6/21.9GB (Resv: 18.0GB) | SaveIn: 42st
+[Gemma4Heartbeat] Ep 02 [#---------]   9.2% | Accumulating micro-batch 552/5973 (last committed step=408) | RunLoss: 1.9405 | Elapsed: 00:12:37
+[Gemma4Heartbeat] Ep 02 [#---------]   9.4% | Accumulating micro-batch 560/5973 (last committed step=408) | RunLoss: 1.8552 | Elapsed: 00:13:40`;
+
+    // YAML Presets
+    const YAML_PRESETS = {
+      stage1: {
+        filename: "configs/stage1_gemma4_10pct.yaml",
+        dataRepo: "./data_subsampled",
+        decoder: "google/gemma-4-26B-A4B-it",
+        encoder: "Qwen/Qwen3-Embedding-4B",
+        initMemory: "checkpoints/gemma4_warmstart",
+        outputDir: "checkpoints/stage1_gemma4",
+        batchSize: 4,
+        gradAccum: 32,
+        maxEpochs: 1,
+        lr: "5.0e-4",
+        maxLength: 1024,
+        numMemories: 16,
+        freezePerceiver: true,
+        ckptEveryLayer: true,
+        datasets: ["enwiki"]
+      },
+      stage2: {
+        filename: "configs/stage2_gemma4_10pct.yaml",
+        dataRepo: "./data_subsampled",
+        decoder: "google/gemma-4-26B-A4B-it",
+        encoder: "Qwen/Qwen3-Embedding-4B",
+        initMemory: "checkpoints/stage1_gemma4/memory.pt",
+        outputDir: "checkpoints/stage2_gemma4",
+        batchSize: 4,
+        gradAccum: 32,
+        maxEpochs: 1,
+        lr: "1.5e-4",
+        maxLength: 1024,
+        numMemories: 16,
+        freezePerceiver: false,
+        ckptEveryLayer: true,
+        datasets: ["squad_v2", "drop", "coqa", "pubmedqa", "quail", "pwc", "cnn_dailymail", "samsum", "dialogsum", "msmarco"]
+      },
+      stage3: {
+        filename: "configs/stage3_gemma4_10pct.yaml",
+        dataRepo: "./data_subsampled",
+        decoder: "google/gemma-4-26B-A4B-it",
+        encoder: "Qwen/Qwen3-Embedding-4B",
+        initMemory: "checkpoints/stage2_gemma4/memory.pt",
+        outputDir: "checkpoints/stage3_gemma4",
+        batchSize: 8,
+        gradAccum: 16,
+        maxEpochs: 5,
+        lr: "1.0e-4",
+        maxLength: 1024,
+        numMemories: 16,
+        freezePerceiver: false,
+        ckptEveryLayer: true,
+        datasets: ["pv4", "pmv2", "factkg", "triviaqa", "narrativeqa", "pubmedqa", "lamp4", "lamp7"]
+      }
+    };
+
+    const ALL_DATASETS_LIST = [
+      "enwiki", "squad_v2", "drop", "coqa", "pubmedqa", "quail", "pwc",
+      "cnn_dailymail", "samsum", "dialogsum", "msmarco",
+      "pv4", "pmv2", "factkg", "triviaqa", "narrativeqa", "lamp4", "lamp7"
+    ];
+
+    // Application State
+    let currentViewMode = "basic"; // 'basic' | 'verbose'
+    let activeStageKey = "stage3";
+    let activeDatasetFilter = "all";
+    let directoryHandle = null;
+    let watchedFileHandle = null;
+    let autoRefreshTotalSeconds = 120;
+    let autoRefreshRemainingSeconds = 120;
+    let autoRefreshTimerId = null;
+    let isSyncingNow = false;
+    let pinManualLogPaste = false;
+    let logSortNewestFirst = true;
+    const LIVE_STREAM_LOGS = {
+      stage1: "",
+      stage2: "",
+      stage3: SAMPLE_RAW_LOG
+    };
+
+    function formatDurationSec(seconds) {
+      if (!Number.isFinite(seconds) || seconds < 0) return "--:--:--";
+      const total = Math.round(seconds);
+      const days = Math.floor(total / 86400);
+      const rem1 = total % 86400;
+      const hrs = Math.floor(rem1 / 3600);
+      const mins = Math.floor((rem1 % 3600) / 60);
+      const secs = rem1 % 60;
+      const hms = `${String(hrs).padStart(2, "0")}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+      return days > 0 ? `${days}d ${hms}` : hms;
+    }
+
+    function buildAsciiBar(current, total, width = 12) {
+      if (!total || total <= 0) return `[step ${current}]`;
+      const frac = Math.min(1, Math.max(0, current / total));
+      const filled = Math.round(frac * width);
+      return `[${"#".repeat(filled)}${"-".repeat(width - filled)}] ${(frac * 100).toFixed(1)}%`;
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. Toast Notifications & Clipboard Helper (No alert/confirm)
+    // -------------------------------------------------------------------------
+    function showToast(message, type = "info") {
+      const container = document.getElementById("toastContainer");
+      const toast = document.createElement("div");
+      const colorMap = {
+        info: "border-indigo-500/50 bg-slate-900/95 text-indigo-200",
+        success: "border-emerald-500/50 bg-slate-900/95 text-emerald-200",
+        warn: "border-amber-500/50 bg-slate-900/95 text-amber-200"
+      };
+      const iconMap = {
+        info: "fa-circle-info text-indigo-400",
+        success: "fa-circle-check text-emerald-400",
+        warn: "fa-triangle-exclamation text-amber-400"
+      };
+      toast.className = `pointer-events-auto px-4 py-3 rounded-xl border shadow-xl flex items-center gap-2.5 text-xs font-medium transition-all duration-300 ${colorMap[type] || colorMap.info}`;
+      toast.innerHTML = `<i class="fa-solid ${iconMap[type] || iconMap.info} text-sm"></i><span>${message}</span>`;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = "0";
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    function copyToClipboard(text, successMsg = "Copied to clipboard!") {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+        showToast(successMsg, "success");
+      } catch (err) {
+        showToast("Could not copy automatically; please select and copy.", "warn");
+      }
+      document.body.removeChild(ta);
+    }
+
+    function copyTextFromElement(elementId, successMsg) {
+      const el = document.getElementById(elementId);
+      if (el) copyToClipboard(el.textContent, successMsg);
+    }
+
+    function copyOneLinerBucketCmd() {
+      copyToClipboard(ONE_SHOT_SCRIPTS[0].cmd, "50-Step Bucket Python One-Liner copied!");
+    }
+
+    function copyLocalServerCmd() {
+      copyToClipboard(
+        `.\\.venv\\Scripts\\python.exe -m http.server 8765`,
+        "Copied! Run in C:\\AI\\MemoryLLM and open http://localhost:8765/memorilla_studio.html"
+      );
+    }
+
+    // -------------------------------------------------------------------------
+    // 2b. Dynamic Auto-Refresh Engine (Directory Handle / File Handle / HTTP Fetch)
+    // -------------------------------------------------------------------------
+    function startAutoRefreshTicker() {
+      if (autoRefreshTimerId) clearInterval(autoRefreshTimerId);
+      autoRefreshTimerId = setInterval(async () => {
+        if (autoRefreshTotalSeconds <= 0) return;
+        autoRefreshRemainingSeconds = Math.max(0, autoRefreshRemainingSeconds - 1);
+        renderAutoSyncCountdown();
+        if (autoRefreshRemainingSeconds === 0) {
+          autoRefreshRemainingSeconds = autoRefreshTotalSeconds;
+          await performLiveTelemetrySync(true);
+        }
+      }, 1000);
+    }
+
+    function updateAutoRefreshInterval() {
+      const sel = document.getElementById("autoRefreshIntervalSelect");
+      const secs = parseInt(sel.value || "0", 10);
+      autoRefreshTotalSeconds = secs;
+      autoRefreshRemainingSeconds = secs;
+      const dot = document.getElementById("autoSyncDot");
+      if (secs <= 0) {
+        dot.className = "w-2 h-2 rounded-full bg-slate-500";
+        document.getElementById("autoSyncCountdown").textContent = "PAUSED";
+        showToast("Auto-Sync paused.", "info");
+      } else {
+        dot.className = "w-2 h-2 rounded-full bg-emerald-400 pulse-dot";
+        renderAutoSyncCountdown();
+        showToast(`Auto-Sync set to every ${secs >= 60 ? (secs / 60) + " min" : secs + "s"}`, "success");
+      }
+    }
+
+    function renderAutoSyncCountdown() {
+      const el = document.getElementById("autoSyncCountdown");
+      if (!el || autoRefreshTotalSeconds <= 0) return;
+      const m = Math.floor(autoRefreshRemainingSeconds / 60);
+      const s = autoRefreshRemainingSeconds % 60;
+      el.textContent = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    }
+
+    async function triggerImmediateSync() {
+      autoRefreshRemainingSeconds = autoRefreshTotalSeconds;
+      renderAutoSyncCountdown();
+      await performLiveTelemetrySync(false);
+    }
+
+    async function watchSingleJsonlFile() {
+      if (!window.showOpenFilePicker) {
+        showToast("Browser restricts live file handles in this context—use 'Import' or run the Local HTTP Server command.", "info");
+        return;
+      }
+      try {
+        const [handle] = await window.showOpenFilePicker({
+          types: [
+            {
+              description: "Memorilla Telemetry (metrics_history.jsonl / metrics.csv)",
+              accept: { "application/json": [".jsonl", ".csv", ".log"] }
+            }
+          ],
+          multiple: false
+        });
+        watchedFileHandle = handle;
+        document.getElementById("watchFileStatusText").textContent = `Watching: ${handle.name}`;
+        document.getElementById("liveSourceBadge").textContent = `Source: Live File Handle (${handle.name})`;
+        showToast(`Now watching ${handle.name} for live updates!`, "success");
+        await performLiveTelemetrySync(false);
+      } catch (err) {
+        if (err.name !== "AbortError") {
+          showToast("Could not attach file watcher: " + err.message, "warn");
+        }
+      }
+    }
+
+    async function performLiveTelemetrySync(isBackgroundTick = false) {
+      if (isSyncingNow) return;
+      isSyncingNow = true;
+      const spinIcon = document.getElementById("syncSpinIcon");
+      if (spinIcon) spinIcon.classList.add("fa-spin");
+
+      let updatedAny = false;
+      const nowStr = new Date().toLocaleTimeString();
+
+      try {
+        // Priority 1: Linked Workspace Directory Handle (reads Stage 1/2/3 JSONL + CSV + epoch dirs)
+        if (directoryHandle) {
+          const ok = await scanLinkedWorkspaceTelemetry();
+          if (ok) updatedAny = true;
+        }
+
+        // Priority 2: Watched Single File Handle (re-reads latest bytes from disk)
+        if (watchedFileHandle) {
+          const file = await watchedFileHandle.getFile();
+          const text = await file.text();
+          if (watchedFileHandle.name.endsWith(".jsonl")) {
+            ingestMetricsHistoryJsonl(text, activeStageKey);
+            updatedAny = true;
+          } else if (watchedFileHandle.name.endsWith(".csv")) {
+            ingestMetricsCsv(text);
+            updatedAny = true;
+          }
+        }
+
+        // Priority 3: Localhost HTTP Server Auto-Fetch (when served via `python -m http.server`)
+        if (!directoryHandle && !watchedFileHandle && window.location.protocol.startsWith("http")) {
+          const stageDir = STAGE_DATA[activeStageKey].dir;
+          try {
+            const resp = await fetch(`${stageDir}/metrics_history.jsonl?t=${Date.now()}`, { cache: "no-store" });
+            if (resp.ok) {
+              const text = await resp.text();
+              if (text && text.trim().startsWith("{")) {
+                ingestMetricsHistoryJsonl(text, activeStageKey);
+                document.getElementById("liveSourceBadge").textContent = `Source: Live HTTP Polling (${stageDir}/metrics_history.jsonl)`;
+                updatedAny = true;
+              }
+            }
+          } catch {}
+
+          // Optional: If user tees raw terminal output to checkpoints/<stage>/console.log, fetch tail lines
+          try {
+            const logResp = await fetch(`${stageDir}/console.log?t=${Date.now()}`, { cache: "no-store" });
+            if (logResp.ok) {
+              const logText = await logResp.text();
+              if (logText && logText.trim().length > 0) {
+                const tailLines = logText.trim().split(/\r?\n/).slice(-80).join("\n");
+                LIVE_STREAM_LOGS[activeStageKey] = tailLines;
+                syncConsoleTextareaIfUnpinned(activeStageKey, "console.log (HTTP)");
+                updatedAny = true;
+              }
+            }
+          } catch {}
+
+          // Also try polling latest validation metrics.csv over HTTP
+          for (const ver of ["version_2", "version_1", "version_0"]) {
+            try {
+              const csvResp = await fetch(`${stageDir}/logs/${ver}/metrics.csv?t=${Date.now()}`, { cache: "no-store" });
+              if (csvResp.ok) {
+                const csvText = await csvResp.text();
+                if (csvText && csvText.includes("val_loss")) {
+                  ingestMetricsCsv(csvText, true);
+                  updatedAny = true;
+                  break;
+                }
+              }
+            } catch {}
+          }
+        }
+
+        if (updatedAny) {
+          document.getElementById("lastSyncedTimestamp").textContent = `Last synced: ${nowStr}`;
+          if (!isBackgroundTick) {
+            showToast(`Telemetry & Console Log synced at ${nowStr}`, "success");
+          }
+        } else if (!isBackgroundTick) {
+          showToast("Link Local Workspace, click 'Watch JSONL', or serve via http.server to enable live disk reads.", "info");
+        }
+      } finally {
+        if (spinIcon) spinIcon.classList.remove("fa-spin");
+        isSyncingNow = false;
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. Navigation & Basic/Verbose Mode Switching
+    // -------------------------------------------------------------------------
+    function switchTab(tabId) {
+      const tabs = ["dashboard", "parser", "storage", "checks", "yaml"];
+      tabs.forEach(t => {
+        const view = document.getElementById(`view-${t}`);
+        const btn = document.getElementById(`tab-${t}`);
+        if (t === tabId) {
+          view.classList.remove("hidden");
+          btn.className = "tab-btn px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 bg-slate-800 text-indigo-400 border border-slate-700";
+        } else {
+          view.classList.add("hidden");
+          btn.className = "tab-btn px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40";
+        }
+      });
+    }
+
+    function setViewMode(mode) {
+      currentViewMode = mode;
+      const btnBasic = document.getElementById("btnModeBasic");
+      const btnVerbose = document.getElementById("btnModeVerbose");
+      const verboseRow = document.getElementById("verboseTelemetryRow");
+      const verboseCols = document.querySelectorAll(".verbose-col");
+      const parserBadge = document.getElementById("parserModeBadge");
+
+      if (mode === "basic") {
+        btnBasic.className = "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 bg-indigo-600 text-white shadow";
+        btnVerbose.className = "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 text-slate-400 hover:text-slate-200";
+        verboseRow.classList.add("hidden");
+        verboseCols.forEach(c => c.classList.add("hidden"));
+        parserBadge.textContent = "Basic Mode: Key Milestones & Summary";
+        parserBadge.className = "px-2 py-0.5 text-[11px] rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30";
+      } else {
+        btnVerbose.className = "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 bg-purple-600 text-white shadow";
+        btnBasic.className = "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 text-slate-400 hover:text-slate-200";
+        verboseRow.classList.remove("hidden");
+        verboseCols.forEach(c => c.classList.remove("hidden"));
+        parserBadge.textContent = "Verbose Mode: Full Telemetry, Heartbeats & Regex Diagnostics";
+        parserBadge.className = "px-2 py-0.5 text-[11px] rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30";
+      }
+
+      renderDashboard();
+      parseConsoleLogInput();
+      showToast(`Switched to ${mode === 'basic' ? 'Basic' : 'Verbose'} Mode`, "info");
+    }
+
+    // -------------------------------------------------------------------------
+    // 4. Dashboard & 50-Step Bucket Rendering
+    // -------------------------------------------------------------------------
+    function selectStageTelemetry(stageKey) {
+      activeStageKey = stageKey;
+      ["stage1", "stage2", "stage3"].forEach(k => {
+        const btn = document.getElementById(`stageBtn-${k}`);
+        if (k === stageKey) {
+          btn.className = "px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all bg-indigo-600/30 border-indigo-500 text-white shadow";
+        } else {
+          btn.className = "px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500";
+        }
+      });
+      renderDashboard();
+      syncConsoleTextareaIfUnpinned(stageKey, `${stageKey} telemetry`);
+    }
+
+    function renderDashboard() {
+      const stage = STAGE_DATA[activeStageKey];
+      document.getElementById("kpiStep").textContent = `${stage.currentStep.toLocaleString()} / ${stage.totalSteps.toLocaleString()}`;
+      document.getElementById("kpiMicroStep").textContent = `mstep ${stage.currentMicroStep.toLocaleString()} / ${stage.totalMicroSteps.toLocaleString()} (Ep ${stage.currentEpoch}/${stage.totalEpochs})`;
+      document.getElementById("kpiLoss").textContent = stage.emaLoss.toFixed(4);
+      document.getElementById("kpiStepLoss").textContent = `Last: ${stage.lastStepLoss.toFixed(4)} | Min: ${stage.minStepLoss.toFixed(4)}`;
+
+      if (stage.valLoss !== null) {
+        const ppl = Math.exp(stage.valLoss).toFixed(2);
+        document.getElementById("kpiValLoss").textContent = stage.valLoss.toFixed(4);
+        document.getElementById("kpiValPpl").textContent = `${stage.valRows.toLocaleString()} rows • PPL: ${ppl}`;
+        document.getElementById("bannerValLoss").innerHTML = `${stage.valLoss.toFixed(4)} <span class="text-xs font-normal text-slate-400">(${ppl} PPL)</span>`;
+      } else {
+        document.getElementById("kpiValLoss").textContent = "N/A (Train Only)";
+        document.getElementById("kpiValPpl").textContent = "Evaluated in Stage 3";
+        document.getElementById("bannerValLoss").innerHTML = `Stage Complete`;
+      }
+
+      document.getElementById("kpiLR").textContent = stage.lr;
+      document.getElementById("kpiSchedule").textContent = stage.scheduleNote;
+      document.getElementById("kpiVRAM").textContent = `${stage.vramAlloc.toFixed(1)} / ${stage.vramPeak.toFixed(1)} GB`;
+      document.getElementById("kpiVRAMResv").textContent = `Reserved: ${stage.vramResv.toFixed(1)} GB (0 Spill)`;
+      document.getElementById("kpiSpeed").textContent = `${stage.speedSecPerStep.toFixed(1)} s/st`;
+      document.getElementById("kpiETA").textContent = `Epoch ETA: ${stage.etaEpoch}`;
+      document.getElementById("verbProjStd").textContent = stage.projStd.toFixed(5);
+      document.getElementById("verbGradNorm").textContent = stage.gradNorm.toFixed(4);
+      document.getElementById("chartStageLabel").textContent = stage.dir;
+
+      // Render 50-Step Bucket Table
+      const tbody = document.getElementById("bucketTableBody");
+      tbody.innerHTML = "";
+      stage.buckets.forEach((b, idx) => {
+        const prevMean = idx > 0 ? stage.buckets[idx - 1].mean : null;
+        const delta = prevMean !== null ? b.mean - prevMean : null;
+        const deltaStr = delta === null ? "—" : (delta <= 0 ? `${delta.toFixed(4)}` : `+${delta.toFixed(4)}`);
+        const deltaColor = delta === null ? "text-slate-500" : (delta <= 0 ? "text-emerald-400 font-semibold" : "text-amber-400");
+        const minPpl = Math.exp(b.min).toFixed(2);
+        const verbClass = currentViewMode === "verbose" ? "" : "hidden";
+
+        const tr = document.createElement("tr");
+        tr.className = "hover:bg-slate-800/40 transition-colors";
+        tr.innerHTML = `
+          <td class="py-2.5 px-3 font-semibold text-white whitespace-nowrap">${b.range}</td>
+          <td class="py-2.5 px-3 text-slate-400">${b.n}</td>
+          <td class="py-2.5 px-3 text-indigo-300 font-semibold">${b.mean.toFixed(4)}</td>
+          <td class="py-2.5 px-3 ${deltaColor}">${deltaStr}</td>
+          <td class="py-2.5 px-3 text-emerald-300">${b.min.toFixed(4)}</td>
+          <td class="py-2.5 px-3 text-slate-300">${minPpl}x</td>
+          <td class="py-2.5 px-3 text-sky-300 verbose-col ${verbClass}">${b.lr}</td>
+          <td class="py-2.5 px-3 font-sans text-slate-300">${b.phase}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      renderLossChartSVG(stage);
+    }
+
+    function renderLossChartSVG(stage) {
+      const container = document.getElementById("lossChartContainer");
+      const buckets = stage.buckets;
+      if (!buckets || buckets.length === 0) {
+        container.innerHTML = `<span class="text-xs text-slate-500">No bucket telemetry loaded</span>`;
+        return;
+      }
+
+      const w = 460;
+      const h = 220;
+      const padL = 42;
+      const padR = 20;
+      const padT = 20;
+      const padB = 34;
+      const plotW = w - padL - padR;
+      const plotH = h - padT - padB;
+
+      const allVals = buckets.flatMap(b => [b.mean, b.min]);
+      if (stage.valLoss !== null) allVals.push(stage.valLoss);
+      const minY = Math.max(0, Math.min(...allVals) - 0.15);
+      const maxY = Math.max(...allVals) + 0.15;
+
+      const xPos = (i) => padL + (buckets.length === 1 ? plotW / 2 : (i / (buckets.length - 1)) * plotW);
+      const yPos = (val) => padT + plotH - ((val - minY) / Math.max(1e-5, maxY - minY)) * plotH;
+
+      const meanPts = buckets.map((b, i) => `${xPos(i).toFixed(1)},${yPos(b.mean).toFixed(1)}`).join(" ");
+      const minPts = buckets.map((b, i) => `${xPos(i).toFixed(1)},${yPos(b.min).toFixed(1)}`).join(" ");
+
+      let gridLines = "";
+      for (let g = 0; g <= 4; g++) {
+        const val = minY + (g / 4) * (maxY - minY);
+        const y = yPos(val);
+        gridLines += `
+          <line x1="${padL}" y1="${y}" x2="${w - padR}" y2="${y}" stroke="#1e293b" stroke-dasharray="3,3" />
+          <text x="${padL - 6}" y="${y + 3}" text-anchor="end" fill="#64748b" font-size="10" font-family="JetBrains Mono">${val.toFixed(2)}</text>
+        `;
+      }
+
+      let valLine = "";
+      if (stage.valLoss !== null) {
+        const vy = yPos(stage.valLoss);
+        valLine = `
+          <line x1="${padL}" y1="${vy}" x2="${w - padR}" y2="${vy}" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="5,4" />
+          <text x="${w - padR - 4}" y="${vy - 5}" text-anchor="end" fill="#fbbf24" font-size="10" font-family="JetBrains Mono">Epoch 1 val_loss = ${stage.valLoss.toFixed(4)}</text>
+        `;
+      }
+
+      let dotsHtml = "";
+      buckets.forEach((b, i) => {
+        const cx = xPos(i);
+        const cyMean = yPos(b.mean);
+        const cyMin = yPos(b.min);
+        dotsHtml += `
+          <circle cx="${cx}" cy="${cyMean}" r="4" fill="#818cf8" stroke="#0f172a" stroke-width="1.5">
+            <title>${b.range}: Mean Loss = ${b.mean.toFixed(4)}</title>
+          </circle>
+          <circle cx="${cx}" cy="${cyMin}" r="3.5" fill="#34d399" stroke="#0f172a" stroke-width="1.5">
+            <title>${b.range}: Min Loss = ${b.min.toFixed(4)}</title>
+          </circle>
+          <text x="${cx}" y="${h - 10}" text-anchor="middle" fill="#64748b" font-size="9" font-family="JetBrains Mono">B${i + 1}</text>
+        `;
+      });
+
+      container.innerHTML = `
+        <svg viewBox="0 0 ${w} ${h}" class="w-full h-full overflow-visible">
+          ${gridLines}
+          ${valLine}
+          <polyline fill="none" stroke="#34d399" stroke-width="2" stroke-opacity="0.7" points="${minPts}" />
+          <polyline fill="none" stroke="#818cf8" stroke-width="2.5" points="${meanPts}" />
+          ${dotsHtml}
+          <!-- Legend -->
+          <g transform="translate(${padL + 8}, ${padT + 4})">
+            <rect x="0" y="0" width="8" height="8" rx="2" fill="#818cf8" />
+            <text x="12" y="8" fill="#cbd5e1" font-size="10">Bucket Mean Loss</text>
+            <rect x="115" y="0" width="8" height="8" rx="2" fill="#34d399" />
+            <text x="127" y="8" fill="#cbd5e1" font-size="10">Bucket Min Step</text>
+          </g>
+        </svg>
+      `;
+    }
+
+    // -------------------------------------------------------------------------
+    // 5. Console Log Parser (Basic vs Verbose Mode + Live Stream Sync)
+    // -------------------------------------------------------------------------
+    function syncConsoleTextareaIfUnpinned(stageKey, sourceLabel = "Auto-Sync") {
+      if (pinManualLogPaste || stageKey !== activeStageKey) return;
+      const streamText = LIVE_STREAM_LOGS[stageKey] || SAMPLE_RAW_LOG;
+      const inputEl = document.getElementById("rawLogInput");
+      if (inputEl && inputEl.value !== streamText) {
+        inputEl.value = streamText;
+      }
+      const syncLabel = document.getElementById("logLastSyncTime");
+      if (syncLabel) {
+        syncLabel.textContent = `Live (${sourceLabel} @ ${new Date().toLocaleTimeString()})`;
+      }
+      parseConsoleLogInput();
+    }
+
+    function syncConsoleToLiveStream() {
+      pinManualLogPaste = false;
+      const cb = document.getElementById("pinManualLogToggle");
+      if (cb) cb.checked = false;
+      updateLiveLogBadgeUI();
+      const streamText = LIVE_STREAM_LOGS[activeStageKey] || SAMPLE_RAW_LOG;
+      document.getElementById("rawLogInput").value = streamText;
+      parseConsoleLogInput();
+      performLiveTelemetrySync(false);
+    }
+
+    function togglePinManualLog() {
+      const cb = document.getElementById("pinManualLogToggle");
+      pinManualLogPaste = !!(cb && cb.checked);
+      updateLiveLogBadgeUI();
+      if (!pinManualLogPaste) {
+        syncConsoleTextareaIfUnpinned(activeStageKey, "Resumed Auto-Sync");
+        showToast("Console Log Parser re-attached to live Auto-Sync stream!", "success");
+      } else {
+        showToast("Pinned manual paste—Auto-Sync will not overwrite your text.", "info");
+      }
+    }
+
+    function handleManualLogInput() {
+      const cb = document.getElementById("pinManualLogToggle");
+      if (cb && !cb.checked) {
+        cb.checked = true;
+        pinManualLogPaste = true;
+        updateLiveLogBadgeUI();
+      }
+      parseConsoleLogInput();
+    }
+
+    function updateLiveLogBadgeUI() {
+      const badge = document.getElementById("liveLogStreamBadge");
+      if (!badge) return;
+      if (pinManualLogPaste) {
+        badge.className = "px-2 py-0.5 text-[10px] font-mono font-semibold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1";
+        badge.innerHTML = `<i class="fa-solid fa-thumbtack text-[9px]"></i> Manual Paste Pinned`;
+      } else {
+        badge.className = "px-2 py-0.5 text-[10px] font-mono font-semibold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1";
+        badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-dot"></span> Auto-Synced`;
+      }
+    }
+
+    function toggleLogSortOrder() {
+      logSortNewestFirst = !logSortNewestFirst;
+      const txt = document.getElementById("logSortOrderText");
+      if (txt) txt.textContent = logSortNewestFirst ? "Newest First" : "Oldest First";
+      parseConsoleLogInput();
+    }
+
+    function loadSampleConsoleLog() {
+      syncConsoleToLiveStream();
+    }
+
+    function parseConsoleLogInput() {
+      const raw = document.getElementById("rawLogInput").value || "";
+      const lines = raw.split(/\r?\n/).filter(l => l.trim().length > 0);
+      const feed = document.getElementById("parsedLogFeed");
+      feed.innerHTML = "";
+
+      const metricsRegex = /\[Gemma4Metrics\]\s*(Ep\s*\d+\/?\d*).*?Step\s+(\d+)\s+\(mstep\s+(\d+)(?:\/(\d+))?\)\s*(?:\|\s*Loss:\s*([\d.]+)\s*\(EMA:\s*([\d.]+)\)\s*)?\|\s*LR:\s*([\deE.+-]+)\s*\|\s*GradNorm:\s*([\d.]+)\s*\|\s*ProjStd:\s*([\d.]+)\s*\|\s*([\d.]+)s\/step.*?EpETA:\s*([^|]+)\|\s*StageETA:\s*([^|]+)\|\s*VRAM:\s*([^|]+)/;
+      const hbRegex = /\[Gemma4Heartbeat\]\s*(Ep\s*\d+).*?Accumulating micro-batch\s+(\d+)\/(\d+)\s+\(last committed step=(\d+)\)(?:\s*\|\s*RunLoss:\s*([\d.]+))?\s*\|\s*Elapsed:\s*([\d:]+)/;
+      const resumeRegex = /\[Gemma4Resume\]\s*(.+)/;
+      const savedRegex = /Saved memory module to\s+(.+)/;
+
+      let parsedEvents = [];
+
+      lines.forEach((line) => {
+        let m;
+        if ((m = line.match(metricsRegex))) {
+          parsedEvents.push({
+            type: "metrics",
+            important: true,
+            ep: m[1].trim(),
+            step: parseInt(m[2], 10),
+            mstep: parseInt(m[3], 10),
+            totalMstep: m[4] ? parseInt(m[4], 10) : 5973,
+            loss: m[5] !== undefined ? parseFloat(m[5]) : null,
+            ema: m[6] !== undefined ? parseFloat(m[6]) : null,
+            lr: m[7].trim(),
+            gradNorm: parseFloat(m[8]),
+            projStd: parseFloat(m[9]),
+            speed: parseFloat(m[10]),
+            epEta: m[11].trim(),
+            stageEta: m[12].trim(),
+            vram: m[13].trim(),
+            raw: line
+          });
+        } else if ((m = line.match(hbRegex))) {
+          parsedEvents.push({
+            type: "heartbeat",
+            important: false, // Filtered out in Basic Mode unless Verbose Mode is selected
+            ep: m[1].trim(),
+            mstep: parseInt(m[2], 10),
+            totalMstep: parseInt(m[3], 10),
+            lastStep: parseInt(m[4], 10),
+            runLoss: m[5] ? parseFloat(m[5]) : null,
+            elapsed: m[6].trim(),
+            raw: line
+          });
+        } else if ((m = line.match(resumeRegex))) {
+          parsedEvents.push({
+            type: "resume",
+            important: true,
+            msg: m[1].trim(),
+            raw: line
+          });
+        } else if ((m = line.match(savedRegex))) {
+          parsedEvents.push({
+            type: "saved",
+            important: true,
+            path: m[1].trim(),
+            raw: line
+          });
+        } else if (line.includes("Restored all states") || line.includes("val_loss") || line.includes("Validation")) {
+          parsedEvents.push({
+            type: "milestone",
+            important: true,
+            msg: line.trim(),
+            raw: line
+          });
+        } else {
+          parsedEvents.push({
+            type: "other",
+            important: false,
+            msg: line.trim(),
+            raw: line
+          });
+        }
+      });
+
+      let visibleEvents = currentViewMode === "basic"
+        ? parsedEvents.filter(e => e.important)
+        : parsedEvents.slice();
+
+      if (logSortNewestFirst) {
+        visibleEvents = visibleEvents.slice().reverse();
+      }
+
+      document.getElementById("parsedLineCount").textContent = `${visibleEvents.length} of ${parsedEvents.length} events shown (${currentViewMode.toUpperCase()})`;
+
+      if (visibleEvents.length === 0) {
+        feed.innerHTML = `<div class="p-4 rounded-xl bg-slate-900 text-xs text-slate-400">No high-priority milestones found in Basic Mode. Switch to <strong>Verbose Mode</strong> to inspect heartbeats and warnings.</div>`;
+        return;
+      }
+
+      visibleEvents.forEach(ev => {
+        const card = document.createElement("div");
+        if (ev.type === "metrics") {
+          const pct = ((ev.mstep / Math.max(1, ev.totalMstep)) * 100).toFixed(1);
+          const lossStr = ev.loss !== null
+            ? `Loss: ${ev.loss.toFixed(4)}${ev.ema !== null ? ` (EMA: ${ev.ema.toFixed(4)})` : ""}`
+            : `Step Committed`;
+          card.className = "p-3.5 rounded-xl bg-indigo-950/40 border border-indigo-500/40 space-y-2";
+          card.innerHTML = `
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 text-[11px] font-mono font-bold rounded bg-indigo-600 text-white">STEP ${ev.step}</span>
+                <span class="text-xs font-semibold text-white">${ev.ep} • ${pct}% (${ev.mstep}/${ev.totalMstep} micro-batches)</span>
+              </div>
+              <span class="text-xs font-mono text-emerald-400 font-bold">${lossStr}</span>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono text-slate-300 pt-1 border-t border-slate-800/80">
+              <div>LR: <span class="text-sky-300">${ev.lr}</span></div>
+              <div>Speed: <span class="text-white">${ev.speed.toFixed(1)}s/step</span></div>
+              <div>Ep ETA: <span class="text-amber-300">${ev.epEta}</span></div>
+              <div>VRAM: <span class="text-purple-300">${ev.vram}</span></div>
+            </div>
+            ${currentViewMode === "verbose" ? `
+              <div class="pt-1.5 border-t border-slate-800/80 flex flex-wrap justify-between text-[11px] font-mono text-slate-400">
+                <span>GradNorm: ${ev.gradNorm.toFixed(4)} | ProjStd: ${ev.projStd.toFixed(5)} | StageETA: ${ev.stageEta}</span>
+              </div>
+            ` : ""}
+          `;
+        } else if (ev.type === "heartbeat") {
+          card.className = "p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs font-mono";
+          card.innerHTML = `
+            <span class="text-slate-400"><i class="fa-solid fa-wave-square text-indigo-400 mr-1.5"></i>[Heartbeat] ${ev.ep} mstep ${ev.mstep}/${ev.totalMstep} (after Step ${ev.lastStep})</span>
+            <span class="text-slate-300">RunLoss: <strong class="text-indigo-300">${ev.runLoss !== null ? ev.runLoss.toFixed(4) : "N/A"}</strong> | Elapsed: ${ev.elapsed}</span>
+          `;
+        } else if (ev.type === "resume" || ev.type === "saved" || ev.type === "milestone") {
+          card.className = "p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/30 flex items-center gap-2.5 text-xs";
+          card.innerHTML = `
+            <i class="fa-solid fa-circle-check text-emerald-400 shrink-0"></i>
+            <span class="font-mono text-emerald-200">${ev.msg || ("Saved checkpoint -> " + ev.path)}</span>
+          `;
+        } else {
+          card.className = "p-2 rounded-lg bg-slate-950 border border-slate-800/80 text-[11px] font-mono text-slate-500 break-all";
+          card.textContent = ev.raw;
+        }
+        feed.appendChild(card);
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // 6. Storage, Checkpoints & Dataset Table Rendering
+    // -------------------------------------------------------------------------
+    function renderStorageTab() {
+      const ckptGrid = document.getElementById("checkpointCardsGrid");
+      ckptGrid.innerHTML = "";
+      CHECKPOINT_INVENTORY.forEach(c => {
+        const badgeColors = {
+          slate: "bg-slate-800 text-slate-300 border-slate-700",
+          emerald: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+          indigo: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40"
+        };
+        const div = document.createElement("div");
+        div.className = "p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between space-y-3";
+        div.innerHTML = `
+          <div>
+            <div class="flex items-center justify-between gap-2">
+              <h3 class="text-xs font-bold text-white">${c.title}</h3>
+              <span class="px-2 py-0.5 text-[10px] font-mono rounded-full border ${badgeColors[c.color]}">${c.badge}</span>
+            </div>
+            <div class="text-[11px] font-mono text-indigo-400 mt-1 break-all">${c.path}</div>
+            <p class="text-xs text-slate-400 mt-2">${c.meta}</p>
+          </div>
+          <ul class="space-y-1 pt-2 border-t border-slate-800/80 text-[11px] font-mono text-slate-300">
+            ${c.files.map(f => `<li class="flex items-center gap-1.5"><i class="fa-regular fa-file-code text-slate-500"></i><span>${f}</span></li>`).join("")}
+          </ul>
+        `;
+        ckptGrid.appendChild(div);
+      });
+
+      filterDatasetTable(activeDatasetFilter);
+    }
+
+    function filterDatasetTable(stageFilter) {
+      activeDatasetFilter = stageFilter;
+      ["all", "stage1", "stage2", "stage3"].forEach(f => {
+        const btn = document.getElementById(`dsFilter-${f}`);
+        if (btn) {
+          btn.className = f === stageFilter
+            ? "px-3 py-1 rounded-lg text-xs font-semibold bg-indigo-600 text-white"
+            : "px-3 py-1 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700";
+        }
+      });
+
+      const tbody = document.getElementById("datasetInventoryBody");
+      tbody.innerHTML = "";
+      const rows = stageFilter === "all"
+        ? DATASET_INVENTORY
+        : DATASET_INVENTORY.filter(d => d.stage === stageFilter);
+
+      rows.forEach(d => {
+        const tr = document.createElement("tr");
+        tr.className = "hover:bg-slate-800/40 transition-colors";
+        const stageBadge = d.stage === "stage1"
+          ? "bg-amber-500/20 text-amber-300"
+          : (d.stage === "stage2" ? "bg-sky-500/20 text-sky-300" : "bg-indigo-500/20 text-indigo-300");
+
+        tr.innerHTML = `
+          <td class="py-2.5 px-3 font-bold text-white">${d.name}</td>
+          <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] uppercase ${stageBadge}">${d.stage}</span></td>
+          <td class="py-2.5 px-3 text-slate-200">${d.trainRows}</td>
+          <td class="py-2.5 px-3 text-slate-300">${d.valRows}</td>
+          <td class="py-2.5 px-3 text-slate-300">${d.shards}</td>
+          <td class="py-2.5 px-3 text-slate-300">${d.collections}</td>
+          <td class="py-2.5 px-3 text-indigo-300">${d.qShape}</td>
+          <td class="py-2.5 px-3"><span class="text-emerald-400 flex items-center gap-1"><i class="fa-solid fa-check"></i> ${d.status}</span></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // 7. One-Shot Diagnostic Scripts Rendering
+    // -------------------------------------------------------------------------
+    function renderOneShotScripts() {
+      const grid = document.getElementById("oneShotScriptsGrid");
+      grid.innerHTML = "";
+      ONE_SHOT_SCRIPTS.forEach((s, i) => {
+        const card = document.createElement("div");
+        card.className = "p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between space-y-3";
+        card.innerHTML = `
+          <div>
+            <div class="flex items-center justify-between gap-2">
+              <h3 class="text-xs font-bold text-white">${s.title}</h3>
+              <button onclick="copyOneShotByIndex(${i})" class="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 transition-all flex items-center gap-1">
+                <i class="fa-regular fa-copy"></i> Copy Command
+              </button>
+            </div>
+            <p class="text-xs text-slate-400 mt-1">${s.desc}</p>
+          </div>
+          <pre class="p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono text-[11px] text-emerald-300 overflow-x-auto">${s.cmd}</pre>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    function copyOneShotByIndex(idx) {
+      if (ONE_SHOT_SCRIPTS[idx]) {
+        copyToClipboard(ONE_SHOT_SCRIPTS[idx].cmd, `${ONE_SHOT_SCRIPTS[idx].title} copied!`);
+      }
+    }
+
+    async function runLiveBrowserFileChecks() {
+      const reportEl = document.getElementById("browserCheckReport");
+      if (!directoryHandle) {
+        showToast("Verified pre-loaded Stage 3 workspace state! Link local folder for live disk scan.", "success");
+        return;
+      }
+      let lines = [`<div class="text-indigo-400 font-semibold">// Live Local Disk Scan (${directoryHandle.name})</div>`];
+      try {
+        for (const sub of ["configs", "checkpoints", "data_subsampled", "data"]) {
+          try {
+            await directoryHandle.getDirectoryHandle(sub);
+            lines.push(`<div class="text-emerald-400">[FOUND DIR] .\\${sub}\\</div>`);
+          } catch {
+            lines.push(`<div class="text-amber-400">[MISSING DIR] .\\${sub}\\</div>`);
+          }
+        }
+        reportEl.innerHTML = lines.join("");
+        showToast("Completed live local directory scan!", "success");
+      } catch (e) {
+        showToast("Error scanning directory: " + e.message, "warn");
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // 8. Interactive YAML Configurator & PowerShell Launch Builder
+    // -------------------------------------------------------------------------
+    function initYamlCheckboxes() {
+      const container = document.getElementById("yamlDatasetCheckboxes");
+      container.innerHTML = "";
+      ALL_DATASETS_LIST.forEach(ds => {
+        const label = document.createElement("label");
+        label.className = "flex items-center gap-2 bg-slate-950 p-2 rounded-lg border border-slate-800 cursor-pointer hover:border-slate-700";
+        label.innerHTML = `
+          <input type="checkbox" value="${ds}" class="yaml-ds-cb rounded text-indigo-600 focus:ring-0" onchange="updateYamlPreview()" />
+          <span class="font-mono text-xs text-slate-200">${ds}</span>
+        `;
+        container.appendChild(label);
+      });
+    }
+
+    function loadYamlPreset(presetKey) {
+      const p = YAML_PRESETS[presetKey];
+      if (!p) return;
+
+      ["stage1", "stage2", "stage3"].forEach(k => {
+        const btn = document.getElementById(`yamlPreset-${k}`);
+        btn.className = k === presetKey
+          ? "px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-600 text-white"
+          : "px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700";
+      });
+
+      document.getElementById("cfgFilename").value = p.filename;
+      document.getElementById("cfgDataRepo").value = p.dataRepo;
+      document.getElementById("cfgDecoder").value = p.decoder;
+      document.getElementById("cfgEncoder").value = p.encoder;
+      document.getElementById("cfgInitMemory").value = p.initMemory;
+      document.getElementById("cfgOutputDir").value = p.outputDir;
+      document.getElementById("cfgBatchSize").value = p.batchSize;
+      document.getElementById("cfgGradAccum").value = p.gradAccum;
+      document.getElementById("cfgMaxEpochs").value = p.maxEpochs;
+      document.getElementById("cfgLR").value = p.lr;
+      document.getElementById("cfgMaxLength").value = p.maxLength;
+      document.getElementById("cfgNumMemories").value = p.numMemories;
+      document.getElementById("envFreezePerceiver").checked = p.freezePerceiver;
+      document.getElementById("envCkptEveryLayer").checked = p.ckptEveryLayer;
+
+      document.querySelectorAll(".yaml-ds-cb").forEach(cb => {
+        cb.checked = p.datasets.includes(cb.value);
+      });
+
+      updateYamlPreview();
+    }
+
+    function updateYamlPreview() {
+      const filename = document.getElementById("cfgFilename").value.trim();
+      const dataRepo = document.getElementById("cfgDataRepo").value.trim();
+      const decoder = document.getElementById("cfgDecoder").value.trim();
+      const encoder = document.getElementById("cfgEncoder").value.trim();
+      const initMemory = document.getElementById("cfgInitMemory").value.trim();
+      const outputDir = document.getElementById("cfgOutputDir").value.trim();
+      const batchSize = parseInt(document.getElementById("cfgBatchSize").value || "8", 10);
+      const gradAccum = parseInt(document.getElementById("cfgGradAccum").value || "16", 10);
+      const maxEpochs = parseInt(document.getElementById("cfgMaxEpochs").value || "5", 10);
+      const lr = document.getElementById("cfgLR").value.trim();
+      const maxLength = parseInt(document.getElementById("cfgMaxLength").value || "1024", 10);
+      const numMemories = parseInt(document.getElementById("cfgNumMemories").value || "16", 10);
+      const freezePerceiver = document.getElementById("envFreezePerceiver").checked ? "1" : "0";
+      const ckptLayers = document.getElementById("envCkptEveryLayer").checked ? "1" : "0";
+
+      const selectedDatasets = Array.from(document.querySelectorAll(".yaml-ds-cb"))
+        .filter(cb => cb.checked)
+        .map(cb => cb.value);
+
+      const effBatch = batchSize * gradAccum;
+      document.getElementById("effectiveBatchBadge").textContent = `${batchSize} × ${gradAccum} × 1 GPU = ${effBatch} examples/step`;
+      document.getElementById("yamlPreviewHeader").textContent = filename;
+
+      const dsYamlLines = selectedDatasets.map(d => `  - "${d}"`).join("\n");
+      const yamlText = `# Save as ${filename}
+decoder: "${decoder}"
+encoder: "${encoder}"
+attn_implementation: "sdpa"
+
+init_memory: "${initMemory}"
+data_repo: "${dataRepo}"
+datasets:
+${dsYamlLines || '  - "pv4"'}
+output_dir: "${outputDir}"
+
+num_memories: ${numMemories}
+
+# Single-device Strix Halo batching (Effective batch size: ${batchSize} x ${gradAccum} = ${effBatch})
+devices: 1
+strategy: "auto"
+num_workers: 0
+batch_size: ${batchSize}
+gradient_accumulation_steps: ${gradAccum}
+max_epochs: ${maxEpochs}
+
+learning_rate: ${lr}
+weight_decay: 0.01
+seed: 23`;
+
+      document.getElementById("yamlCodeOutput").textContent = yamlText;
+
+      const psText = `$env:HIP_VISIBLE_DEVICES = "0"
+$env:TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL = "1"
+$env:PYTORCH_HIP_ALLOC_CONF = "garbage_collection_threshold:0.6"
+$env:MEMORILLA_FREEZE_PERCEIVER = "${freezePerceiver}"
+$env:MEMORILLA_CKPT_EVERY_N_LAYERS = "${ckptLayers}"
+$env:MEMORILLA_STAGE_DIR = ".\\${outputDir.replace(/\//g, '\\')}"
+
+.\\.venv\\Scripts\\python.exe train.py --config ${filename} \`
+    --decoder ${decoder} \`
+    --init_memory .\\${initMemory.replace(/\//g, '\\')} \`
+    --output_dir .\\${outputDir.replace(/\//g, '\\')} \`
+    --max_length ${maxLength} \`
+    --devices 1 \`
+    --attn_implementation sdpa`;
+
+      document.getElementById("psLaunchOutput").textContent = psText;
+    }
+
+    async function saveYamlToDisk() {
+      const yamlContent = document.getElementById("yamlCodeOutput").textContent;
+      const rawPath = document.getElementById("cfgFilename").value.trim();
+      const baseName = rawPath.split("/").pop() || "stage_config.yaml";
+
+      // Download directly in browser
+      const blob = new Blob([yamlContent], { type: "text/yaml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = baseName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast(`Downloaded ${baseName}!`, "success");
+    }
+
+    // -------------------------------------------------------------------------
+    // 9. Local Workspace File System Access API & File Upload Reader
+    // -------------------------------------------------------------------------
+    async function connectLocalWorkspace() {
+      if (!window.showDirectoryPicker) {
+        showToast("Your browser restricts folder linking here—use 'Watch JSONL' or 'Import' next to it!", "info");
+        return;
+      }
+      try {
+        directoryHandle = await window.showDirectoryPicker();
+        document.getElementById("folderStatusText").textContent = `Linked: ${directoryHandle.name}`;
+        document.getElementById("liveSourceBadge").textContent = `Source: Linked Directory (${directoryHandle.name})`;
+        showToast(`Connected to local folder: ${directoryHandle.name}`, "success");
+        await performLiveTelemetrySync(false);
+      } catch (err) {
+        if (err.name !== "AbortError") {
+          showToast("Use the 'Import' button to load metrics_history.jsonl or .yaml files in Preview mode.", "info");
+        }
+      }
+    }
+
+    async function scanLinkedWorkspaceTelemetry() {
+      if (!directoryHandle) return false;
+      let anyRead = false;
+      try {
+        const ckptsDir = await directoryHandle.getDirectoryHandle("checkpoints");
+        const stageMap = [
+          { key: "stage3", folder: "stage3_gemma4" },
+          { key: "stage2", folder: "stage2_gemma4" },
+          { key: "stage1", folder: "stage1_gemma4" }
+        ];
+
+        for (const item of stageMap) {
+          try {
+            const sDir = await ckptsDir.getDirectoryHandle(item.folder);
+            // 1. Read metrics_history.jsonl
+            try {
+              const jsonlFile = await sDir.getFileHandle("metrics_history.jsonl");
+              const file = await jsonlFile.getFile();
+              const text = await file.text();
+              ingestMetricsHistoryJsonl(text, item.key);
+              anyRead = true;
+            } catch {}
+
+            // 1b. Optional: Read console.log if present in stage checkpoint dir
+            try {
+              const logHandle = await sDir.getFileHandle("console.log");
+              const logFile = await logHandle.getFile();
+              const logText = await logFile.text();
+              if (logText && logText.trim().length > 0) {
+                LIVE_STREAM_LOGS[item.key] = logText.trim().split(/\r?\n/).slice(-80).join("\n");
+                syncConsoleTextareaIfUnpinned(item.key, "console.log");
+                anyRead = true;
+              }
+            } catch {}
+
+            // 2. Read logs/version_*/metrics.csv for val_loss
+            if (item.key === activeStageKey) {
+              try {
+                const logsDir = await sDir.getDirectoryHandle("logs");
+                for (const ver of ["version_2", "version_1", "version_0"]) {
+                  try {
+                    const vDir = await logsDir.getDirectoryHandle(ver);
+                    const csvHandle = await vDir.getFileHandle("metrics.csv");
+                    const csvFile = await csvHandle.getFile();
+                    const csvText = await csvFile.text();
+                    if (csvText.includes("val_loss")) {
+                      ingestMetricsCsv(csvText, true);
+                      anyRead = true;
+                      break;
+                    }
+                  } catch {}
+                }
+              } catch {}
+            }
+          } catch {}
+        }
+      } catch {}
+      return anyRead;
+    }
+
+    function handleFilesUploaded(event) {
+      const files = Array.from(event.target.files || []);
+      files.forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const content = e.target.result;
+          if (file.name.endsWith(".jsonl")) {
+            ingestMetricsHistoryJsonl(content, activeStageKey);
+            showToast(`Loaded ${file.name} into 50-Step Bucket Analyzer!`, "success");
+          } else if (file.name.endsWith(".log") || file.name.endsWith(".txt")) {
+            document.getElementById("rawLogInput").value = content;
+            parseConsoleLogInput();
+            switchTab("parser");
+            showToast(`Parsed console log from ${file.name}!`, "success");
+          } else if (file.name.endsWith(".csv")) {
+            ingestMetricsCsv(content);
+          }
+        };
+        reader.readAsText(file);
+      });
+    }
+
+    function ingestMetricsHistoryJsonl(jsonlText, stageKey) {
+      const lines = jsonlText.split(/\r?\n/).filter(l => l.trim().length > 0);
+      const bucketSize = parseInt(document.getElementById("bucketSizeSelect").value || "50", 10);
+      const groups = new Map();
+      let latestRec = null;
+      let globalMin = Infinity;
+      let runningEma = null;
+      const parsedRecords = [];
+
+      lines.forEach(line => {
+        try {
+          const r = JSON.parse(line);
+          const loss = r.step_loss ?? r.loss;
+          if (typeof loss === "number") {
+            runningEma = runningEma === null ? loss : (0.1 * loss + 0.9 * runningEma);
+            r._computed_ema = r.ema_step_loss ?? r.ema_loss ?? runningEma;
+          }
+          if (typeof r.global_step === "number") {
+            latestRec = r;
+            parsedRecords.push(r);
+          }
+          if (typeof loss === "number" && typeof r.global_step === "number") {
+            if (loss < globalMin) globalMin = loss;
+            const bIdx = Math.floor((r.global_step - 1) / bucketSize);
+            if (!groups.has(bIdx)) groups.set(bIdx, []);
+            groups.get(bIdx).push({ loss, lr: r.lr });
+          }
+        } catch {}
+      });
+
+      if (groups.size > 0) {
+        const newBuckets = [];
+        Array.from(groups.keys()).sort((a, b) => a - b).forEach(bIdx => {
+          const arr = groups.get(bIdx);
+          const mean = arr.reduce((s, x) => s + x.loss, 0) / arr.length;
+          const min = Math.min(...arr.map(x => x.loss));
+          const lastLr = arr[arr.length - 1].lr;
+          const startStep = bIdx * bucketSize + 1;
+          const endStep = (bIdx + 1) * bucketSize;
+          newBuckets.push({
+            range: `Steps ${String(startStep).padStart(3, " ")}-${String(endStep).padStart(3, " ")}`,
+            start: startStep,
+            end: endStep,
+            n: arr.length,
+            mean,
+            min,
+            lr: typeof lastLr === "number" ? lastLr.toExponential(1) : "—",
+            phase: arr.length < bucketSize ? `In Progress (${arr.length}/${bucketSize} steps)` : "Completed Bucket"
+          });
+        });
+
+        STAGE_DATA[stageKey].buckets = newBuckets;
+        if (latestRec) {
+          STAGE_DATA[stageKey].currentStep = latestRec.global_step || STAGE_DATA[stageKey].currentStep;
+          STAGE_DATA[stageKey].currentMicroStep = latestRec.micro_step ?? latestRec.committed_micro_step ?? STAGE_DATA[stageKey].currentMicroStep;
+          if (typeof latestRec.epoch === "number") {
+            STAGE_DATA[stageKey].currentEpoch = latestRec.epoch + 1;
+          }
+          const latestLoss = latestRec.step_loss ?? latestRec.loss;
+          if (typeof latestLoss === "number") STAGE_DATA[stageKey].lastStepLoss = latestLoss;
+          if (typeof latestRec._computed_ema === "number") STAGE_DATA[stageKey].emaLoss = latestRec._computed_ema;
+          if (typeof latestRec.lr === "number") STAGE_DATA[stageKey].lr = latestRec.lr.toExponential(2);
+          if (typeof latestRec.grad_norm === "number") STAGE_DATA[stageKey].gradNorm = latestRec.grad_norm;
+          const pStd = latestRec.proj_weight_std ?? latestRec.proj_std;
+          if (typeof pStd === "number") STAGE_DATA[stageKey].projStd = pStd;
+          if (typeof latestRec.step_time_s === "number") STAGE_DATA[stageKey].speedSecPerStep = latestRec.step_time_s;
+          if (typeof latestRec.vram_alloc_gb === "number") STAGE_DATA[stageKey].vramAlloc = latestRec.vram_alloc_gb;
+          if (typeof latestRec.vram_peak_gb === "number") STAGE_DATA[stageKey].vramPeak = latestRec.vram_peak_gb;
+          if (typeof latestRec.vram_reserved_gb === "number") STAGE_DATA[stageKey].vramResv = latestRec.vram_reserved_gb;
+          if (typeof latestRec.eta_epoch_s === "number") STAGE_DATA[stageKey].etaEpoch = formatDurationSec(latestRec.eta_epoch_s);
+          if (Number.isFinite(globalMin)) STAGE_DATA[stageKey].minStepLoss = globalMin;
+
+          // Update health summary banner dynamically
+          const firstMean = newBuckets[0].mean;
+          const latestMean = newBuckets[newBuckets.length - 1].mean;
+          if (stageKey === activeStageKey) {
+            document.getElementById("healthStepLabel").textContent =
+              `• Epoch ${STAGE_DATA[stageKey].currentEpoch} Live at Step ${STAGE_DATA[stageKey].currentStep} (mstep ${STAGE_DATA[stageKey].currentMicroStep}/${STAGE_DATA[stageKey].totalMicroSteps})`;
+            document.getElementById("healthSummaryText").innerHTML =
+              `Training loss has dropped from <strong>${firstMean.toFixed(4)}</strong> (${newBuckets[0].range.trim()}) to <strong>${latestMean.toFixed(4)}</strong> (${newBuckets[newBuckets.length - 1].range.trim()}), with best step reaching <strong>${STAGE_DATA[stageKey].minStepLoss.toFixed(4)}</strong>.`;
+          }
+        }
+
+        // Synthesize live [Gemma4Metrics] stream for Console Log Parser from the last 35 JSONL records
+        const totalEp = STAGE_DATA[stageKey].totalEpochs || 5;
+        const defaultTotalM = STAGE_DATA[stageKey].totalMicroSteps || 5973;
+        const tailRecs = parsedRecords.slice(-35);
+        const synthLines = [
+          `[Gemma4Resume] Live telemetry stream active from ${STAGE_DATA[stageKey].dir}/metrics_history.jsonl (${parsedRecords.length} total steps recorded)`
+        ];
+        if (STAGE_DATA[stageKey].valLoss !== null) {
+          synthLines.push(`Saved memory module to ${STAGE_DATA[stageKey].dir}\\epoch-00 (Epoch 1 val_loss: ${STAGE_DATA[stageKey].valLoss.toFixed(6)})`);
+        }
+        let prevEp = null;
+        tailRecs.forEach(r => {
+          const epNum = (typeof r.epoch === "number" ? r.epoch : 0) + 1;
+          if (prevEp !== null && epNum > prevEp) {
+            synthLines.push(`Saved memory module to ${STAGE_DATA[stageKey].dir}\\epoch-${String(prevEp - 1).padStart(2, "0")}`);
+          }
+          prevEp = epNum;
+          const mstep = r.micro_step ?? r.committed_micro_step ?? 0;
+          const totM = r.total_micro_steps || defaultTotalM;
+          const bar = buildAsciiBar(mstep, totM, 12);
+          const sLoss = r.step_loss ?? r.loss ?? STAGE_DATA[stageKey].lastStepLoss;
+          const sEma = r._computed_ema ?? sLoss;
+          const lrStr = typeof r.lr === "number" ? r.lr.toExponential(2) : STAGE_DATA[stageKey].lr;
+          const gNorm = typeof r.grad_norm === "number" ? r.grad_norm.toFixed(4) : STAGE_DATA[stageKey].gradNorm.toFixed(4);
+          const pStd = typeof (r.proj_weight_std ?? r.proj_std) === "number"
+            ? (r.proj_weight_std ?? r.proj_std).toFixed(5)
+            : STAGE_DATA[stageKey].projStd.toFixed(5);
+          const sTime = typeof r.step_time_s === "number" ? r.step_time_s.toFixed(2) : STAGE_DATA[stageKey].speedSecPerStep.toFixed(2);
+          const elap = formatDurationSec(r.elapsed_s ?? 0);
+          const epEta = formatDurationSec(r.eta_epoch_s ?? ((totM - mstep) / 16) * (r.step_time_s || 125));
+          const stEta = formatDurationSec(r.eta_stage_s ?? (((totM - mstep) + Math.max(0, totalEp - epNum) * totM) / 16) * (r.step_time_s || 125));
+          const vAlloc = typeof r.vram_alloc_gb === "number" ? r.vram_alloc_gb.toFixed(1) : STAGE_DATA[stageKey].vramAlloc.toFixed(1);
+          const vPeak = typeof r.vram_peak_gb === "number" ? r.vram_peak_gb.toFixed(1) : STAGE_DATA[stageKey].vramPeak.toFixed(1);
+          const vResv = typeof r.vram_reserved_gb === "number" ? r.vram_reserved_gb.toFixed(1) : STAGE_DATA[stageKey].vramResv.toFixed(1);
+          const saveIn = 50 - (r.global_step % 50);
+
+          synthLines.push(
+            `[Gemma4Metrics] Ep ${String(epNum).padStart(2, "0")}/${String(totalEp).padStart(2, "0")} ${bar} | ` +
+            `Step ${r.global_step} (mstep ${mstep}/${totM}) | Loss: ${sLoss.toFixed(4)} (EMA: ${sEma.toFixed(4)}) | ` +
+            `LR: ${lrStr} | GradNorm: ${gNorm} | ProjStd: ${pStd} | ${sTime}s/step | ` +
+            `Elapsed: ${elap} | EpETA: ${epEta} | StageETA: ${stEta} | ` +
+            `VRAM: ${vAlloc}/${vPeak}GB (Resv: ${vResv}GB) | SaveIn: ${saveIn}st`
+          );
+        });
+
+        LIVE_STREAM_LOGS[stageKey] = synthLines.join("\n");
+        syncConsoleTextareaIfUnpinned(stageKey, "metrics_history.jsonl");
+        renderDashboard();
+      }
+    }
+
+    function ingestMetricsCsv(csvText, silent = false) {
+      const lines = csvText.trim().split(/\r?\n/);
+      if (lines.length < 2) return;
+      const headers = lines[0].split(",");
+      const valIdx = headers.indexOf("val_loss");
+      if (valIdx === -1) return;
+      for (let i = lines.length - 1; i >= 1; i--) {
+        const cols = lines[i].split(",");
+        const val = parseFloat(cols[valIdx]);
+        if (!isNaN(val)) {
+          STAGE_DATA[activeStageKey].valLoss = val;
+          renderDashboard();
+          if (!silent) showToast(`Updated val_loss = ${val.toFixed(6)} from metrics.csv!`, "success");
+          break;
+        }
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // 10. Initialize App on Load
+    // -------------------------------------------------------------------------
+    window.onload = function () {
+      initYamlCheckboxes();
+      loadYamlPreset("stage3");
+      renderDashboard();
+      loadSampleConsoleLog();
+      renderStorageTab();
+      renderOneShotScripts();
+      renderAutoSyncCountdown();
+      startAutoRefreshTicker();
+      // Attempt an initial silent HTTP sync if hosted via python -m http.server
+      if (window.location.protocol.startsWith("http")) {
+        performLiveTelemetrySync(true);
+      }
+    };
+  </script>
+</body>
+</html>

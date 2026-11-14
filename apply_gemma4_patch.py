@@ -840,7 +840,7 @@ class CheckpointResumeManager:
         self.scheduler = scheduler
         if self.pending_state and self.pending_state.get("scheduler_state_dict") is not None:
             try:
-                scheduler.load_state_dict(self.pending_state["scheduler_state_dict"])
+                import copy; scheduler.load_state_dict(copy.deepcopy(self.pending_state["scheduler_state_dict"]))
                 print("[Gemma4Resume] Restored LRScheduler state.")
             except Exception as exc:
                 print(f"[Gemma4Resume] Warning: Could not restore scheduler state ({exc}).")
@@ -952,14 +952,9 @@ class CheckpointResumeManager:
         Wraps a training DataLoader iterator to skip completed epochs (`epoch < resume_epoch`)
         and fast-forward past `committed_micro_step` batches when resuming mid-epoch.
         """
+        if self._epoch_cursor < self.resume_epoch:
+            self._epoch_cursor = self.resume_epoch
         epoch_idx = self._epoch_cursor
-        if epoch_idx < self.resume_epoch:
-            print(
-                f"[Gemma4Resume] Skipping already completed epoch {epoch_idx} "
-                f"(resuming at epoch {self.resume_epoch})"
-            )
-            self._epoch_cursor += 1
-            return
 
         self._ensure_model_restored_before_loop()
         self.current_epoch = epoch_idx
@@ -1217,7 +1212,7 @@ def install_runtime_monkeypatch() -> None:
                         os.replace(tmp_ckpt, ckpt_path)
 
                 def on_exception(self, trainer, pl_module, exception):
-                    if RESUME_MANAGER.output_dir and RESUME_MANAGER.global_step > 0:
+                    if RESUME_MANAGER.output_dir and RESUME_MANAGER.global_step > 0 and RESUME_MANAGER.current_micro_step > RESUME_MANAGER.resume_micro_step:
                         ckpt_path = os.path.join(RESUME_MANAGER.output_dir, "last.ckpt")
                         tmp_ckpt = ckpt_path + ".tmp"
                         try:
