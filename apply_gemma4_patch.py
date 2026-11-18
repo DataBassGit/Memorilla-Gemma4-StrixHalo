@@ -1468,3 +1468,74 @@ if __name__ == "__main__":
     parser.add_argument("--memorilla_root", type=str, default=".")
     cli_args, _ = parser.parse_known_args()
     patch_scripts(cli_args.memorilla_root)
+
+# [Gemma4ChatTemplateFix] Strip 4-token thought suffix when add_generation_prompt=True
+try:
+    from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+    if not getattr(PreTrainedTokenizerBase, "_gemma4_chat_template_patched", False):
+        _orig_apply_chat_template = PreTrainedTokenizerBase.apply_chat_template
+        _THOUGHT_STR = "<|channel>thought\n<channel|>"
+        _THOUGHT_TOKS = ["<|channel>", "thought", "\n", "<channel|>"]
+
+        def _strip_thought_ids(tokenizer, ids):
+            if isinstance(ids, list) and len(ids) >= 4 and isinstance(ids[-1], int):
+                try:
+                    if tokenizer.convert_ids_to_tokens(ids[-4:]) == _THOUGHT_TOKS:
+                        return ids[:-4]
+                except Exception:
+                    pass
+            return ids
+
+        def _patched_apply_chat_template(self, conversation, *args, **kwargs):
+            out = _orig_apply_chat_template(self, conversation, *args, **kwargs)
+            if not kwargs.get("add_generation_prompt", False):
+                return out
+            if isinstance(out, str):
+                if out.endswith(_THOUGHT_STR):
+                    return out[:-len(_THOUGHT_STR)]
+                return out
+            if isinstance(out, list):
+                if len(out) > 0 and isinstance(out[0], list):
+                    return [_strip_thought_ids(self, seq) for seq in out]
+                if len(out) > 0 and isinstance(out[0], str):
+                    return [s[:-len(_THOUGHT_STR)] if s.endswith(_THOUGHT_STR) else s for s in out]
+                return _strip_thought_ids(self, out)
+            if hasattr(out, "input_ids"):
+                ids = out["input_ids"]
+                if isinstance(ids, list):
+                    if len(ids) > 0 and isinstance(ids[0], list):
+                        out["input_ids"] = [_strip_thought_ids(self, seq) for seq in ids]
+                    else:
+                        out["input_ids"] = _strip_thought_ids(self, ids)
+                    if "attention_mask" in out and isinstance(out["attention_mask"], list):
+                        am = out["attention_mask"]
+                        if len(am) > 0 and isinstance(am[0], list):
+                            out["attention_mask"] = [m[:len(s)] for m, s in zip(am, out["input_ids"])]
+                        else:
+                            out["attention_mask"] = am[:len(out["input_ids"])]
+            return out
+
+        PreTrainedTokenizerBase.apply_chat_template = _patched_apply_chat_template
+        PreTrainedTokenizerBase._gemma4_chat_template_patched = True
+        print("[Gemma4Patch] Installed apply_chat_template 4-token thought-suffix stripper.")
+except Exception as _e:
+    print(f"[Gemma4Patch] Warning: failed to patch apply_chat_template: {_e}")
+
+# [Gemma4Fp32MasterWeights] Keep trainable MemoryModule weights in fp32 under bf16-mixed autocast
+try:
+    from memorilla.memory import MemoryModule
+    if not getattr(MemoryModule, "_fp32_master_patched", False):
+        _orig_mem_to = MemoryModule.to
+        def _fp32_master_to(self, *args, **kwargs):
+            new_args = [torch.float32 if a in (torch.bfloat16, torch.float16) else a for a in args]
+            if kwargs.get("dtype") in (torch.bfloat16, torch.float16):
+                kwargs["dtype"] = torch.float32
+            return _orig_mem_to(self, *new_args, **kwargs)
+        MemoryModule.to = _fp32_master_to
+        MemoryModule.bfloat16 = lambda self: _orig_mem_to(self, dtype=torch.float32)
+        MemoryModule.half = lambda self: _orig_mem_to(self, dtype=torch.float32)
+        MemoryModule._fp32_master_patched = True
+        print("[Gemma4Patch] Locked MemoryModule master weights to float32 (prevents bf16 update rounding).")
+except Exception as _e:
+    print(f"[Gemma4Patch] Warning: fp32 master weight hook failed: {_e}")
+
