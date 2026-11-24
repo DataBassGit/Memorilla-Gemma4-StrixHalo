@@ -21,14 +21,27 @@ Conditions
                it is the control that says how much of the score comes from the documents.
   closed_book  Stanford's closed-book baseline: no memory tokens, the baseline's own prompt and suffix.
 
-Two steps, because the decoder and the scoring encoder do not need to be loaded together:
+Separate steps, because the decoder and the scoring encoder do not need to be loaded together
+(use the venv's python: .\.venv\Scripts\python.exe):
 
   python stanford_eval_gemma4.py generate --checkpoint .\checkpoints\stage3_gemma4\epoch-04 `
       --data_repo .\data_10pct --benchmark all --n 500 --output_dir results\stanford_ep04
+  python stanford_eval_gemma4.py judge --output_dir results\stanford_ep04        (optional second scorer)
   python stanford_eval_gemma4.py score --output_dir results\stanford_ep04
 
 `generate` is resumable: rerun the same command and it skips rows already written. Rows are taken in a
 fixed seeded order, so a later run with a larger --n (or --n 0 for the whole split) extends the earlier one.
+
+Second scorer (`judge`, not part of Stanford's protocol)
+  Stanford scores pmv2, pv4 and factkg by embedding the free-text answer with Qwen3-Embedding-4B and taking
+  the nearest answer choice, and pubmedqa by the answer's first word. `judge` reads the answers already on
+  disk and has the plain frozen decoder (no memory module, no memory tokens, no documents) say which choice
+  each answer matches. It never sees the reference answer; for the choice benchmarks it does not see the
+  question either, so it can only match text and cannot answer the question itself. Every answer is judged
+  once per rotation of the choices and the probabilities are averaged, which cancels a preference for a
+  letter. `score` then reports Stanford's accuracy and the judge's side by side, how often the two scorers
+  pick the same choice, and writes the rows where they differ to <benchmark>/disagreements.jsonl so that a
+  third model can settle them. Stanford's scorer stays the number that compares with their table.
 
 The same two commands evaluate Stanford's own released checkpoint, which calibrates this script against
 their published numbers on your hardware:
@@ -38,15 +51,17 @@ their published numbers on your hardware:
       --checkpoint .\checkpoints\memorilla_qwen3\stage3 --data_repo .\data_10pct --benchmark all --n 500 `
       --output_dir results\stanford_qwen3_stage3
 
-Tested end to end on a tiny random decoder and encoder (resume, scoring on known answers, cached decoding
-against transformers' own greedy generate). NOT YET RUN AGAINST THE REAL GEMMA 4 OR QWEN3 WEIGHTS: read the
-[Setup], [SelfCheck], [Sample] and [EncoderCheck] lines before trusting a number.
+`generate` and `score` have run on the real INT4 Gemma 4 and Qwen3-Embedding-4B (the encoder check reproduced
+the stored embeddings at cosine 0.9998). `judge` is tested on a tiny random decoder and with stand-in judges
+(one that matches text, one that always answers the same letter), NOT YET ON THE REAL GEMMA 4: read its
+[JudgeCheck] and [Judge] lines (probability on the letters, agreement across rotations) before trusting it.
 """
 
 import argparse
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import random
 import re
@@ -69,7 +84,7 @@ except (ImportError, OSError):
 
     importlib.util.find_spec = _safe_find_spec
 
-SCRIPT_VERSION = "1.0"
+SCRIPT_VERSION = "1.1"
 CONDITIONS = ("memory", "shuffled", "closed_book")
 THOUGHT_STUB = "<|channel>thought\n<channel|>"
 EXTRA_STOP_TOKENS = ("<turn|>", "<end_of_turn>", "<|im_end|>", "<|endoftext|>")
@@ -78,6 +93,35 @@ BENCHMARK_FILE = "benchmark.json"
 ENCODER_CHECK_FILE = "encoder_check.json"
 SUMMARY_FILE = "summary.json"
 ENCODER_CHECK_ROWS = 16
+
+# Second scorer: the frozen decoder as a judge.
+JUDGE_FILE = "judge.json"
+JUDGE_SUFFIX = ".judge.jsonl"
+DISAGREEMENTS_FILE = "disagreements.jsonl"
+JUDGE_ACCURACY = "judge_accuracy"
+JUDGE_ACCURACY_HARD = "judge_accuracy_hard"
+JUDGED_SCORINGS = ("choice", "polarity")
+POLARITY_OPTIONS = ("yes", "no", "maybe")
+LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+JUDGE_SYSTEM_PROMPT = "You are a careful grader. You compare texts and reply with a single letter."
+JUDGE_CHOICE_TEMPLATE = (
+    "Below is a RESPONSE, followed by {count} OPTIONS labelled {first} to {last}.\n\n"
+    "Pick the option that says the same thing as the response: the same recommendation, the same facts, the same "
+    "position. Go by content, not by wording, length or formatting. If no option matches exactly, pick the closest "
+    "one.\n\n"
+    "RESPONSE:\n<<<\n{response}\n>>>\n\n"
+    "OPTIONS:\n\n{options}\n\n"
+    "Answer with one letter ({letters}) and nothing else."
+)
+JUDGE_POLARITY_TEMPLATE = (
+    "Below is a QUESTION and a RESPONSE to it, followed by {count} OPTIONS labelled {first} to {last}.\n\n"
+    "Pick the option that states the answer the response gives to the question. Report what the response says, "
+    "not what you believe the right answer is.\n\n"
+    "QUESTION:\n<<<\n{question}\n>>>\n\n"
+    "RESPONSE:\n<<<\n{response}\n>>>\n\n"
+    "OPTIONS:\n\n{options}\n\n"
+    "Answer with one letter ({letters}) and nothing else."
+)
 
 
 # ----------------------------------------------------------------------------- small helpers
@@ -220,37 +264,56 @@ def install_gemma4_patch(required: bool):
 
 
 class Evaluator:
-    """The frozen decoder plus the memory module, with greedy KV-cached generation from prompt embeddings."""
+    """The frozen decoder plus the memory module, with greedy KV-cached generation from prompt embeddings.
 
-    def __init__(self, decoder: str, checkpoint: Path, cache_dir: str | None):
+    With ``checkpoint=None`` only the plain decoder is loaded (no memory module, no memory token, embedding
+    table untouched); that is what `judge` uses.
+    """
+
+    def __init__(self, decoder: str, checkpoint: Path | None, cache_dir: str | None):
         import torch
         from transformers import AutoConfig
 
-        from memorilla.llm import MemoryLLM, inject_memory
-        from memorilla.memory import MemoryModule
-        from memorilla.utils import load_memory_state
-
         self.torch = torch
-        self.inject_memory = inject_memory
-        self.memory = MemoryModule.from_pretrained(checkpoint)
+        self.memory, self.memory_token_id, self.num_memories = None, None, 0
+        if checkpoint is not None:
+            from memorilla.llm import MemoryLLM, inject_memory
+            from memorilla.memory import MemoryModule
+            from memorilla.utils import load_memory_state
 
-        config = AutoConfig.from_pretrained(decoder, cache_dir=cache_dir)
-        hidden = getattr(config, "hidden_size", None) or getattr(getattr(config, "text_config", None), "hidden_size", None)
-        if hidden is not None and self.memory.config.output_dim != hidden:
-            raise SystemExit(
-                f"The checkpoint produces {self.memory.config.output_dim}-dimensional memory tokens but {decoder} has "
-                f"hidden size {hidden}; pass the decoder the checkpoint was trained with (--decoder)."
+            self.inject_memory = inject_memory
+            self.memory = MemoryModule.from_pretrained(checkpoint)
+
+            config = AutoConfig.from_pretrained(decoder, cache_dir=cache_dir)
+            hidden = getattr(config, "hidden_size", None) or getattr(
+                getattr(config, "text_config", None), "hidden_size", None
             )
+            if hidden is not None and self.memory.config.output_dim != hidden:
+                raise SystemExit(
+                    f"The checkpoint produces {self.memory.config.output_dim}-dimensional memory tokens but {decoder} "
+                    f"has hidden size {hidden}; pass the decoder the checkpoint was trained with (--decoder)."
+                )
 
-        self.llm = MemoryLLM(decoder, self.memory, attn_implementation="sdpa", cache_dir=cache_dir)
-        self.dec = self.llm.text_model.eval()
+            self.llm = MemoryLLM(decoder, self.memory, attn_implementation="sdpa", cache_dir=cache_dir)
+            self.dec = self.llm.text_model.eval()
+            self.tok = self.llm.tokenizer
+            self.memory_token_id = self.llm.memory_token_id
+        else:
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+
+            # The same call memorilla.llm.MemoryLLM makes, so a Gemma 4 name goes through the patch's INT4 loader.
+            self.dec = AutoModelForCausalLM.from_pretrained(
+                decoder, cache_dir=cache_dir, torch_dtype=torch.bfloat16, attn_implementation="sdpa"
+            ).eval()
+            self.tok = AutoTokenizer.from_pretrained(decoder, cache_dir=cache_dir)
+            if self.tok.pad_token is None:
+                self.tok.pad_token = self.tok.eos_token
         if next(self.dec.parameters()).device.type == "cpu" and torch.cuda.is_available():
             self.dec.to("cuda:0")
         self.device = next(self.dec.parameters()).device
-        self.tok = self.llm.tokenizer
-        self.memory_token_id = self.llm.memory_token_id
-        self.memory.to(device=self.device, dtype=torch.bfloat16).eval()
-        self.num_memories = self.memory.num_memories
+        if self.memory is not None:
+            self.memory.to(device=self.device, dtype=torch.bfloat16).eval()
+            self.num_memories = self.memory.num_memories
         self.backbone = getattr(self.dec, "model", None)
         if self.backbone is None:
             self.backbone = self.dec.base_model
@@ -281,16 +344,23 @@ class Evaluator:
             pass
 
         # The module must hold exactly the weights in the checkpoint file.
-        state = load_memory_state(checkpoint)
-        key = "memory_queries" if "memory_queries" in state else next(k for k in state if "memory_projection" not in k)
-        loaded = dict(self.memory.named_parameters()).get(key)
-        if loaded is None:
-            loaded = self.memory.state_dict()[key]
-        loaded = loaded.detach().cpu()
-        difference = float((loaded.float() - state[key].to(loaded.dtype).float()).abs().max())
-        if difference > 1e-6:
-            raise SystemExit(f"Loaded memory weights differ from {checkpoint} ({key}: max diff {difference:.3g}).")
-        print(f"[Setup] Memory weights match the checkpoint file ({key}, max diff {difference:.1g}).")
+        if self.memory is not None:
+            state = load_memory_state(checkpoint)
+            key = (
+                "memory_queries"
+                if "memory_queries" in state
+                else next(k for k in state if "memory_projection" not in k)
+            )
+            loaded = dict(self.memory.named_parameters()).get(key)
+            if loaded is None:
+                loaded = self.memory.state_dict()[key]
+            loaded = loaded.detach().cpu()
+            difference = float((loaded.float() - state[key].to(loaded.dtype).float()).abs().max())
+            if difference > 1e-6:
+                raise SystemExit(f"Loaded memory weights differ from {checkpoint} ({key}: max diff {difference:.3g}).")
+            print(f"[Setup] Memory weights match the checkpoint file ({key}, max diff {difference:.1g}).")
+        else:
+            print("[Setup] Plain decoder only: no memory module, no memory token.")
         print(
             f"[Setup] decoder={decoder} | device={self.device} | memory tokens={self.num_memories} | "
             f"stop ids={sorted(self.stop_ids)} | thought channel={self.has_thought_channel}"
@@ -334,6 +404,15 @@ class Evaluator:
         if self.has_thought_channel and not prompt.endswith(THOUGHT_STUB):
             prompt += THOUGHT_STUB
         return prompt
+
+    def next_token_logprobs(self, prompts: list[str]):
+        """Log-probabilities over the vocabulary for the token that follows each prompt (plain text, no memory)."""
+        torch = self.torch
+        encoded = self.tok(prompts, padding=True, padding_side="left", add_special_tokens=False, return_tensors="pt")
+        with torch.inference_mode():
+            embeds = self.embed(encoded["input_ids"].to(self.device))
+            hidden, _ = self._backbone(embeds, encoded["attention_mask"].to(self.device))
+            return torch.log_softmax(self._logits(hidden[:, -1, :]), dim=-1).cpu()
 
     # -- decoding --------------------------------------------------------------------------
     def _backbone(self, embeds, mask, past=None, use_cache=False):
@@ -630,6 +709,313 @@ def cmd_generate(args) -> None:
     print(f"\nGeneration finished. Next: python stanford_eval_gemma4.py score --output_dir {out_dir}")
 
 
+# ----------------------------------------------------------------------------- judge (second scorer)
+def load_benchmark_metas(out_dir: Path) -> dict[str, dict]:
+    """benchmark.json of every benchmark folder `generate` wrote under an output folder."""
+    if not out_dir.is_dir():
+        raise SystemExit(f"{out_dir} does not exist. Run `generate` first.")
+    metas = {}
+    for folder in sorted(path for path in out_dir.iterdir() if path.is_dir() and (path / BENCHMARK_FILE).exists()):
+        with (folder / BENCHMARK_FILE).open(encoding="utf-8") as handle:
+            metas[folder.name] = json.load(handle)
+    if not metas:
+        raise SystemExit(f"No benchmark folders with {BENCHMARK_FILE} under {out_dir}. Run `generate` first.")
+    return metas
+
+
+def rotation_shifts(count: int, rotations: int) -> list[int]:
+    """Cyclic shifts of the options to judge: every one by default, otherwise an evenly spread subset."""
+    if count <= 1:
+        return [0]
+    if rotations <= 0 or rotations >= count:
+        return list(range(count))
+    return sorted({(index * count) // rotations for index in range(rotations)})
+
+
+def letter_token_table(tok, count: int) -> list[list[int]]:
+    """For each option letter, the single tokens the decoder can write it with ("A" and " A")."""
+    table: list[list[int]] = []
+    owner: dict[int, str] = {}
+    for letter in LETTERS[:count]:
+        ids: list[int] = []
+        for variant in (letter, " " + letter):
+            encoded = tok.encode(variant, add_special_tokens=False)
+            if len(encoded) == 1 and int(encoded[0]) not in ids:
+                ids.append(int(encoded[0]))
+        if not ids:
+            raise SystemExit(f"The judge's tokenizer has no single token for the letter {letter!r}.")
+        for token_id in ids:
+            if token_id in owner:
+                raise SystemExit(f"Token {token_id} would stand for both {owner[token_id]!r} and {letter!r}.")
+            owner[token_id] = letter
+        table.append(ids)
+    return table
+
+
+def judge_candidates(record: dict, scoring: str) -> list[tuple[int, str]]:
+    """The options the judge chooses between, as (index its pick is reported with, text shown)."""
+    if scoring == "polarity":
+        return [(index, option.capitalize()) for index, option in enumerate(POLARITY_OPTIONS)]
+    choices = [str(choice).strip() for choice in record.get("choices") or []]
+    return [(index, choice) for index, choice in enumerate(choices) if choice]
+
+
+def judge_message(scoring: str, record: dict, ordered: list[tuple[int, str]]) -> str:
+    """The judge's instructions for one answer and one ordering of the options. The reference is never included."""
+    letters = LETTERS[: len(ordered)]
+    options = "\n\n".join(f"Option {letter}:\n{text}" for letter, (_, text) in zip(letters, ordered, strict=True))
+    template = JUDGE_POLARITY_TEMPLATE if scoring == "polarity" else JUDGE_CHOICE_TEMPLATE
+    return template.format(
+        count=len(ordered),
+        first=letters[0],
+        last=letters[-1],
+        question=str(record.get("question", "")).strip(),
+        response=str(record["prediction"]).strip(),
+        options=options,
+        letters=", ".join(letters),
+    )
+
+
+def resolve_judgement(logprobs, table, candidates: list[tuple[int, str]], shifts: list[int], num_options: int) -> dict:
+    """Turn next-token log-probabilities (one row per rotation) into a pick among the original options.
+
+    Rotation ``shift`` shows candidate ``(i + shift) % count`` under letter ``i``. The probability each rotation
+    puts on the letters is renormalised over the letters and averaged per candidate, so a judge that simply
+    prefers one letter ends up indifferent instead of rewarding whichever option sat under that letter.
+    """
+    import torch
+
+    count = len(candidates)
+    totals = [0.0] * count
+    letter_picks, masses = [], []
+    for rotation, shift in enumerate(shifts):
+        letter_logprobs = [float(torch.logsumexp(logprobs[rotation][table[i]], dim=0)) for i in range(count)]
+        mass = sum(math.exp(value) for value in letter_logprobs)
+        masses.append(mass)
+        probs = [math.exp(value) / mass if mass > 0 else 1.0 / count for value in letter_logprobs]
+        letter_picks.append(max(range(count), key=probs.__getitem__))
+        for position, probability in enumerate(probs):
+            totals[(position + shift) % count] += probability
+    averaged = [value / len(shifts) for value in totals]
+    best = max(range(count), key=averaged.__getitem__)
+    by_option = [0.0] * num_options
+    for (index, _), probability in zip(candidates, averaged, strict=True):
+        by_option[index] = round(probability, 4)
+    return {
+        "pick": candidates[best][0],
+        "probs": by_option,
+        # Share of the next-token probability that fell on the option letters at all (1.0 = the judge wanted
+        # to answer with a letter; low = it wanted to write something else and the pick is weak).
+        "letter_mass": round(sum(masses) / len(masses), 4),
+        "letter_picks": letter_picks,
+        "num_candidates": count,
+        # What each rotation voted for on its own, as original option indices.
+        "votes": [candidates[(position + shift) % count][0] for position, shift in zip(letter_picks, shifts, strict=True)],
+        "rotations": len(shifts),
+    }
+
+
+def gold_index(scoring: str, record: dict, M) -> int | None:
+    """Index of the reference among the options the judge picks from; None when the row is not scored."""
+    answer = str(record.get("answer", "")).strip()
+    if scoring == "polarity":
+        gold = M.first_polarity(answer) if M is not None else None
+        return POLARITY_OPTIONS.index(gold) if gold in POLARITY_OPTIONS else None
+    choices = [str(choice).strip() for choice in record.get("choices") or []]
+    return choices.index(answer) if answer in choices else None
+
+
+def judge_report(name: str, scoring: str, condition: str, records: dict[int, dict], verdicts: dict[int, dict], M) -> str:
+    """One line on a judged file: accuracy plus the two things that say whether the judge can be trusted."""
+    judged = {row: verdict for row, verdict in verdicts.items() if row in records and verdict.get("pick") is not None}
+    skipped = sum(1 for row, verdict in verdicts.items() if row in records and verdict.get("pick") is None)
+    parts = [f"{len(judged)} judged" + (f", {skipped} with nothing to judge" if skipped else "")]
+    golds = {row: gold_index(scoring, records[row], M) for row in verdicts if row in records}
+    scored = [row for row, gold in golds.items() if gold is not None]
+    if scored:
+        correct = sum(verdicts[row].get("pick") == golds[row] for row in scored)
+        parts.append(f"accuracy {100 * correct / len(scored):.1f}% (n={len(scored)})")
+    if judged:
+        masses = [verdict["letter_mass"] for verdict in judged.values()]
+        weak = sum(mass < 0.5 for mass in masses)
+        parts.append(f"probability on the letters {sum(masses) / len(masses):.2f}" + (f" ({weak} rows under 0.5)" if weak else ""))
+        rotated = [verdict for verdict in judged.values() if verdict.get("rotations", 1) > 1]
+        if rotated:
+            unanimous = sum(len(set(verdict["votes"])) == 1 for verdict in rotated)
+            parts.append(f"all rotations agree on {100 * unanimous / len(rotated):.1f}% of rows")
+        first = sum(verdict["letter_picks"].count(0) for verdict in judged.values())
+        total = sum(len(verdict["letter_picks"]) for verdict in judged.values())
+        fair = sum(len(verdict["letter_picks"]) / verdict["num_candidates"] for verdict in judged.values())
+        if all(verdict.get("rotations") == verdict["num_candidates"] for verdict in judged.values()):
+            # Over a full set of rotations a consistent judge lands on every letter exactly once per answer.
+            parts.append(
+                f"first letter picked in {100 * first / total:.1f}% of rotations ({100 * fair / total:.1f}% = no letter bias)"
+            )
+    return f"  [Judge] {name} | {condition}: " + " | ".join(parts)
+
+
+def judge_file(ev, name: str, scoring: str, condition: str, records: dict[int, dict], path: Path, args, table, M) -> None:
+    """Judge every answer of one predictions file; resumable like `generate`."""
+    rows = list(records)  # the order they were generated in, so a partial run covers the same first rows
+    if args.n > 0:
+        rows = rows[: args.n]
+    records = {row: records[row] for row in rows}
+
+    plans: dict[int, tuple[list[tuple[int, str]], list[int]]] = {}
+    for row in rows:
+        candidates = judge_candidates(records[row], scoring)
+        judgeable = bool(str(records[row].get("prediction", "")).strip()) and 2 <= len(candidates) <= len(table)
+        plans[row] = (candidates, rotation_shifts(len(candidates), args.rotations) if judgeable else [])
+
+    done = read_records(path)
+    todo = [
+        row
+        for row in rows
+        if row not in done or (plans[row][1] and done[row].get("rotations") != len(plans[row][1]))
+    ]
+    if not todo:
+        print(f"  [{name} | {condition}] all {len(rows)} answers already judged.")
+        print(judge_report(name, scoring, condition, records, done, M))
+        return
+
+    groups, current, size = [], [], 0
+    for row in todo:
+        need = len(plans[row][1])
+        if current and size + need > args.batch_size:
+            groups.append(current)
+            current, size = [], 0
+        current.append(row)
+        size += need
+    if current:
+        groups.append(current)
+
+    started, finished, shown = time.monotonic(), 0, 0
+    with open_for_append(path) as handle:
+        for number, group in enumerate(groups):
+            prompts, offsets = [], {}
+            for row in group:
+                candidates, shifts = plans[row]
+                offsets[row] = len(prompts)
+                for shift in shifts:
+                    ordered = [candidates[(position + shift) % len(candidates)] for position in range(len(candidates))]
+                    prompts.append(
+                        ev.closed_book_prompt(judge_message(scoring, records[row], ordered), JUDGE_SYSTEM_PROMPT, "")
+                    )
+            if prompts and not shown:
+                print(f"\n[JudgeCheck] {name} | {condition}: first prompt, start and end")
+                print("    " + repr(prompts[0][:420]))
+                print("    ... " + repr(prompts[0][-170:]))
+            logprobs = ev.next_token_logprobs(prompts) if prompts else None
+            for row in group:
+                candidates, shifts = plans[row]
+                num_options = len(POLARITY_OPTIONS) if scoring == "polarity" else len(records[row].get("choices") or [])
+                if shifts:
+                    start = offsets[row]
+                    verdict = resolve_judgement(logprobs[start : start + len(shifts)], table, candidates, shifts, num_options)
+                else:
+                    reason = "empty answer" if not str(records[row].get("prediction", "")).strip() else "fewer than two options"
+                    verdict = {"pick": None, "skipped": reason}
+                handle.write(json.dumps({"row": row, **verdict}, ensure_ascii=False) + "\n")
+                if shifts and shown < 2:
+                    shown += 1
+                    gold = gold_index(scoring, records[row], M)
+                    print(f"  [Sample {name} | {condition}]")
+                    print(f"    answer     : {str(records[row]['prediction']).strip()[:150]!r}")
+                    print(f"    judge picks: option {verdict['pick']} = {dict(candidates)[verdict['pick']][:110]!r}")
+                    print(
+                        f"    probs {verdict['probs']} | on letters {verdict['letter_mass']:.2f} | "
+                        f"rotation votes {verdict['votes']} | reference is option {gold}"
+                    )
+            handle.flush()
+
+            finished += len(group)
+            if number % 10 == 0 or finished == len(todo):
+                elapsed = time.monotonic() - started
+                remaining = elapsed / finished * (len(todo) - finished)
+                print(
+                    f"  [{name} | {condition}] {finished}/{len(todo)} answers | {elapsed / finished:.1f}s/answer | "
+                    f"elapsed {format_seconds(elapsed)} | left {format_seconds(remaining)}"
+                )
+    print(judge_report(name, scoring, condition, records, read_records(path), M))
+
+
+def cmd_judge(args) -> None:
+    for variable in ("MEMORILLA_STAGE_DIR", "MEMORILLA_OUTPUT_DIR"):
+        os.environ.pop(variable, None)
+    out_dir = Path(args.output_dir)
+    metas = load_benchmark_metas(out_dir)
+    wanted = None if "all" in args.benchmark else set(args.benchmark)
+    targets = {
+        name: meta
+        for name, meta in metas.items()
+        if meta["scoring"] in JUDGED_SCORINGS and (wanted is None or name in wanted)
+    }
+    if not targets:
+        judgeable = [name for name, meta in metas.items() if meta["scoring"] in JUDGED_SCORINGS]
+        raise SystemExit(f"Nothing to judge. Benchmarks under {out_dir} that a judge can score: {judgeable or 'none'}.")
+
+    files = []
+    for name, meta in targets.items():
+        for condition in args.conditions:
+            records = read_records(out_dir / name / f"{condition}.jsonl")
+            if records:
+                files.append((name, meta["scoring"], condition, records))
+    if not files:
+        raise SystemExit(f"No generated answers for {sorted(targets)} with conditions {args.conditions} under {out_dir}.")
+
+    settings = {
+        "script_version": SCRIPT_VERSION,
+        "judge_model": args.judge,
+        "sees": "the answer and the options; plus the question for yes/no/maybe benchmarks; never the reference, "
+        "the documents or memory tokens",
+        "system_prompt": JUDGE_SYSTEM_PROMPT,
+        "choice_template": JUDGE_CHOICE_TEMPLATE,
+        "polarity_template": JUDGE_POLARITY_TEMPLATE,
+    }
+    judge_path = out_dir / JUDGE_FILE
+    if judge_path.exists():
+        with judge_path.open(encoding="utf-8") as handle:
+            previous = json.load(handle)
+        changed = [
+            key
+            for key in ("judge_model", "system_prompt", "choice_template", "polarity_template")
+            if previous.get(key) != settings[key]
+        ]
+        if changed and not args.force:
+            raise SystemExit(
+                f"{out_dir} already holds judgements made with a different {', '.join(changed)}. Delete the "
+                f"*{JUDGE_SUFFIX} files and {JUDGE_FILE} to start over (or --force to mix them)."
+            )
+    write_json(judge_path, settings)
+
+    install_gemma4_patch(required="gemma-4" in args.judge.lower())
+    try:
+        from memorilla import metrics as M
+    except Exception as error:  # only needed to read the reference of yes/no/maybe rows for the progress report
+        print(f"[Setup] memorilla.metrics not importable ({error}); `score` will report the judge's accuracy.")
+        M = None
+
+    ev = Evaluator(args.judge, None, args.cache_dir)
+    most = max(len(judge_candidates(record, scoring)) for _, scoring, _, records in files for record in records.values())
+    table = letter_token_table(ev.tok, min(max(most, 2), len(LETTERS)))
+    print(
+        "[JudgeCheck] option letters as tokens: "
+        + ", ".join(
+            f"{letter}={[(token_id, ev.tok.convert_ids_to_tokens(token_id)) for token_id in ids]}"
+            for letter, ids in zip(LETTERS, table, strict=False)
+        )
+    )
+    for name, scoring, condition, records in files:
+        try:
+            judge_file(ev, name, scoring, condition, records, out_dir / name / f"{condition}{JUDGE_SUFFIX}", args, table, M)
+        except KeyboardInterrupt:
+            print("\nInterrupted. Judgements written so far are kept; rerun the same command to continue.")
+            raise SystemExit(130) from None
+        except Exception as error:
+            print(f"  [{name} | {condition}] JUDGING FAILED: {type(error).__name__}: {error}")
+    print(f"\nJudging finished. Next: python stanford_eval_gemma4.py score --output_dir {out_dir}")
+
+
 # ----------------------------------------------------------------------------- score
 class HFEncoder:
     """Qwen3-Embedding through transformers: last-token pooling, L2-normalised, no instruction prefix."""
@@ -743,9 +1129,89 @@ def check_encoder(encoder: HFEncoder, out_dir: Path) -> dict | None:
     return result
 
 
-def per_row_scores(scoring, predictions, references, choices, encoder, M, B) -> dict[str, list[float | None]]:
-    """Per-row values of the metrics that have them, for paired intervals. None = row not scored."""
+def compare_scorers(scoring, name, condition, rows, by_row, stanford_picks, verdicts, M) -> tuple[dict, dict, list]:
+    """Stanford's scorer against the judge on the rows both scored.
+
+    Returns the statistics, the judge's per-row correctness, and the rows where the two picked differently.
+    """
+    cells = {"both_correct": 0, "only_stanford_correct": 0, "only_judge_correct": 0, "neither_correct": 0}
+    correct: dict[int, float] = {}
+    hard_correct: list[float] = []
+    same, differing, masses, unanimous = 0, [], [], []
+    for row, stanford_pick in zip(rows, stanford_picks, strict=True):
+        verdict = verdicts.get(row)
+        gold = gold_index(scoring, by_row[row], M)
+        if verdict is None or gold is None:
+            continue
+        judge_pick = verdict.get("pick")
+        stanford_right, judge_right = stanford_pick == gold, judge_pick == gold
+        correct[row] = float(judge_right)
+        if by_row[row].get("hard"):
+            hard_correct.append(float(judge_right))
+        key = (
+            "both_correct"
+            if stanford_right and judge_right
+            else "only_stanford_correct"
+            if stanford_right
+            else "only_judge_correct"
+            if judge_right
+            else "neither_correct"
+        )
+        cells[key] += 1
+        if judge_pick is not None:
+            masses.append(verdict.get("letter_mass", 0.0))
+            if verdict.get("rotations", 1) > 1:
+                unanimous.append(float(len(set(verdict.get("votes", []))) == 1))
+        if stanford_pick == judge_pick:
+            same += 1
+        else:
+            options = list(POLARITY_OPTIONS) if scoring == "polarity" else [str(c) for c in by_row[row]["choices"]]
+            differing.append(
+                {
+                    "benchmark": name,
+                    "condition": condition,
+                    "row": row,
+                    "question": by_row[row].get("question"),
+                    "prediction": by_row[row]["prediction"],
+                    "options": options,
+                    "reference_option": gold,
+                    "stanford_pick": stanford_pick,
+                    "judge_pick": judge_pick,
+                    "judge_probs": verdict.get("probs"),
+                }
+            )
+    total = len(correct)
+    if total == 0:
+        return {}, {}, []
+
+    def share(count: float) -> float:
+        return round(100 * count / total, 2)
+
+    stats = {
+        "rows": total,
+        JUDGE_ACCURACY: share(sum(correct.values())),
+        "stanford_accuracy_same_rows": share(cells["both_correct"] + cells["only_stanford_correct"]),
+        "same_pick": share(same),
+        **{key: share(value) for key, value in cells.items()},
+        "judge_probability_on_letters": round(sum(masses) / len(masses), 3) if masses else None,
+        "judge_rotations_unanimous": round(100 * sum(unanimous) / len(unanimous), 2) if unanimous else None,
+    }
+    if hard_correct:
+        stats["hard_rows"] = len(hard_correct)
+        stats[JUDGE_ACCURACY_HARD] = round(100 * sum(hard_correct) / len(hard_correct), 2)
+    return stats, correct, differing
+
+
+def per_row_scores(
+    scoring, predictions, references, choices, encoder, M, B
+) -> tuple[dict[str, list[float | None]], list[int | None] | None]:
+    """Per-row values of the metrics that have them, for paired intervals. None = row not scored.
+
+    Also returns what Stanford's scorer picked per row (a choice index, or the yes/no/maybe index, or None when
+    the answer does not start with one of the three), for comparison with the judge.
+    """
     scores: dict[str, list[float | None]] = {}
+    picks: list[int | None] | None = None
     if scoring == B.CHOICE:
         nonempty = [[choice for choice in row if choice.strip()] for row in choices]
         vectors = encoder.embed([p.strip() for p in predictions] + list(chain.from_iterable(nonempty)))
@@ -754,15 +1220,19 @@ def per_row_scores(scoring, predictions, references, choices, encoder, M, B) -> 
             choice_vectors.append(vectors[offset : offset + len(row)])
             offset += len(row)
         selected = M.choice_predictions(vectors[: len(predictions)], choice_vectors, choices)
+        picks = [int(index) for index in selected]
         scores[B.ACCURACY] = [
             float(M.choice_index(row, reference) == index)
             for row, reference, index in zip(choices, references, selected, strict=True)
         ]
     elif scoring == B.POLARITY:
         values: list[float | None] = []
+        picks = []
         for prediction, reference in zip(predictions, references, strict=True):
             gold = M.first_polarity(reference)
-            values.append(None if gold is None else float(M.first_polarity(prediction) == gold))
+            said = M.first_polarity(prediction)
+            picks.append(POLARITY_OPTIONS.index(said) if said in POLARITY_OPTIONS else None)
+            values.append(None if gold is None else float(said == gold))
         scores[B.ACCURACY] = values
     else:
         from rouge_score import rouge_scorer
@@ -776,7 +1246,7 @@ def per_row_scores(scoring, predictions, references, choices, encoder, M, B) -> 
         scores[B.ROUGEL] = [
             float(scorer.score(r, p.strip())[B.ROUGEL].fmeasure) for p, r in zip(predictions, references, strict=True)
         ]
-    return scores
+    return scores, picks
 
 
 def cmd_score(args) -> None:
@@ -784,18 +1254,14 @@ def cmd_score(args) -> None:
     from memorilla import metrics as M
 
     out_dir = Path(args.output_dir)
-    folders = sorted(path for path in out_dir.iterdir() if path.is_dir() and (path / BENCHMARK_FILE).exists())
-    if not folders:
-        raise SystemExit(f"No benchmark folders with {BENCHMARK_FILE} under {out_dir}. Run `generate` first.")
-    run = {}
+    metas = load_benchmark_metas(out_dir)
+    run, judge_settings = {}, None
     if (out_dir / RUN_FILE).exists():
         with (out_dir / RUN_FILE).open(encoding="utf-8") as handle:
             run = json.load(handle)
-
-    metas = {}
-    for folder in folders:
-        with (folder / BENCHMARK_FILE).open(encoding="utf-8") as handle:
-            metas[folder.name] = json.load(handle)
+    if (out_dir / JUDGE_FILE).exists():
+        with (out_dir / JUDGE_FILE).open(encoding="utf-8") as handle:
+            judge_settings = json.load(handle)
 
     encoder, encoder_report = None, None
     if any(meta["scoring"] == B.CHOICE for meta in metas.values()):
@@ -810,7 +1276,7 @@ def cmd_score(args) -> None:
         meteor_ok = False
         print(f"[Score] METEOR skipped: {error}")
 
-    summary = {"run": run, "encoder_check": encoder_report, "benchmarks": {}}
+    summary = {"run": run, "encoder_check": encoder_report, "judge": judge_settings, "benchmarks": {}}
     print()
     for name, meta in metas.items():
         try:
@@ -821,6 +1287,7 @@ def cmd_score(args) -> None:
                 continue
             entry = {"scoring": scoring, "split": meta["split"], "rows_in_split": meta.get("rows_in_split"), "conditions": {}}
             row_scores: dict[str, dict[str, dict[int, float]]] = {}
+            judged_any, differing_rows = False, []
             for condition, by_row in records.items():
                 rows = sorted(by_row)
                 predictions = [str(by_row[row]["prediction"]) for row in rows]
@@ -837,11 +1304,40 @@ def cmd_score(args) -> None:
                     "num_examples": len(rows),
                     **{metric: round(100 * value, 2) for metric, value in official.items()},
                 }
-                per_row = per_row_scores(scoring, predictions, references, choices, encoder, M, B)
+                per_row, picks = per_row_scores(scoring, predictions, references, choices, encoder, M, B)
                 row_scores[condition] = {
                     metric: {row: value for row, value in zip(rows, values, strict=True) if value is not None}
                     for metric, values in per_row.items()
                 }
+                if scoring == B.POLARITY:
+                    # Stanford's rule reads the first word only. An answer that does not open with yes/no/maybe
+                    # counts as wrong whatever it goes on to say, so a high share here means the rule, not the
+                    # model, is setting the score.
+                    scored = [pick for pick, value in zip(picks, per_row[B.ACCURACY], strict=True) if value is not None]
+                    if scored:
+                        entry["conditions"][condition]["no_yes_no_maybe"] = round(
+                            100 * sum(pick is None for pick in scored) / len(scored), 2
+                        )
+
+                # Second scorer, when `judge` has been run on this file.
+                verdicts = read_records(out_dir / name / f"{condition}{JUDGE_SUFFIX}") if picks is not None else {}
+                if verdicts:
+                    stats, judge_correct, differing = compare_scorers(
+                        scoring, name, condition, rows, by_row, picks, verdicts, M
+                    )
+                    if stats:
+                        judged_any = True
+                        differing_rows.extend(differing)
+                        entry.setdefault("judge", {})[condition] = stats
+                        entry["conditions"][condition][JUDGE_ACCURACY] = stats[JUDGE_ACCURACY]
+                        if JUDGE_ACCURACY_HARD in stats:
+                            entry["conditions"][condition][JUDGE_ACCURACY_HARD] = stats[JUDGE_ACCURACY_HARD]
+                        row_scores[condition][JUDGE_ACCURACY] = judge_correct
+
+            if judged_any:
+                with (out_dir / name / DISAGREEMENTS_FILE).open("w", encoding="utf-8") as handle:
+                    for record in differing_rows:
+                        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
             entry["differences"] = {}
             if "memory" in row_scores:
@@ -864,18 +1360,33 @@ def cmd_score(args) -> None:
             summary["benchmarks"][name] = entry
 
             shown = list(dict.fromkeys(m for c in entry["conditions"].values() for m in c if m != "num_examples"))
+            judge_counts = {JUDGE_ACCURACY: "rows", JUDGE_ACCURACY_HARD: "hard_rows"}
             for metric in shown:
                 cells = []
                 for condition in CONDITIONS:
                     values = entry["conditions"].get(condition)
                     if values is not None and metric in values:
-                        cells.append(f"{condition} {values[metric]:6.2f} (n={values['num_examples']})")
-                line = f"[{name:12s}] {metric:13s} " + " | ".join(cells)
+                        count = values["num_examples"]
+                        if metric in judge_counts:
+                            count = entry["judge"][condition][judge_counts[metric]]
+                        cells.append(f"{condition} {values[metric]:6.2f} (n={count})")
+                line = f"[{name:12s}] {metric:19s} " + " | ".join(cells)
                 for other, label in (("shuffled", "mem-shuf"), ("closed_book", "mem-closed")):
                     difference = entry["differences"].get(f"memory_minus_{other}:{metric}")
                     if difference is not None:
                         line += f" | {label} {difference['mean']:+.2f} {difference['ci95']} (n={difference['rows']})"
                 print(line)
+            for condition in CONDITIONS:
+                stats = entry.get("judge", {}).get(condition)
+                if stats:
+                    print(
+                        f"[{name:12s}] two scorers   {condition}: same pick on {stats['same_pick']:.1f}% of "
+                        f"{stats['rows']} rows | both right {stats['both_correct']:.1f} | only Stanford's "
+                        f"{stats['only_stanford_correct']:.1f} | only the judge {stats['only_judge_correct']:.1f} | "
+                        f"neither {stats['neither_correct']:.1f}"
+                    )
+            if judged_any:
+                print(f"[{name:12s}] {len(differing_rows)} rows where the scorers differ -> {out_dir / name / DISAGREEMENTS_FILE}")
         except Exception as error:  # e.g. a reference that is not among its row's choices
             print(f"[{name:12s}] SCORING FAILED: {type(error).__name__}: {error}")
             summary["benchmarks"][name] = {"error": f"{type(error).__name__}: {error}"}
@@ -913,6 +1424,21 @@ def main() -> None:
     generate.add_argument("--output_dir", required=True)
     generate.add_argument("--force", action="store_true", help="Write into a folder made with other settings.")
     generate.set_defaults(function=cmd_generate)
+
+    judge = commands.add_parser(
+        "judge", help="Second scorer: the plain frozen decoder says which answer choice each generated answer matches."
+    )
+    judge.add_argument("--output_dir", required=True, help="The folder `generate` wrote to.")
+    judge.add_argument("--judge", default="google/gemma-4-26B-A4B-it", help="Model that judges (no memory module is loaded).")
+    judge.add_argument("--benchmark", nargs="+", default=["all"], help="Benchmark names, or all (pmv2 pv4 factkg pubmedqa).")
+    judge.add_argument("--conditions", nargs="+", choices=CONDITIONS, default=list(CONDITIONS))
+    judge.add_argument("--n", type=int, default=0, help="Judge only the first n answers of each file; 0 judges all.")
+    judge.add_argument("--rotations", type=int, default=0,
+                       help="Orderings of the options per answer. 0 = every rotation (cancels letter bias); 1 = fastest.")
+    judge.add_argument("--batch_size", type=int, default=8, help="Prompts per forward pass (one prompt per rotation).")
+    judge.add_argument("--cache_dir", default=os.environ.get("MEMORILLA_MODEL_CACHE") or None)
+    judge.add_argument("--force", action="store_true", help="Add to judgements made with another judge or prompt.")
+    judge.set_defaults(function=cmd_judge)
 
     score = commands.add_parser("score", help="Score generated answers with upstream's metrics.")
     score.add_argument("--output_dir", required=True, help="The folder `generate` wrote to.")
