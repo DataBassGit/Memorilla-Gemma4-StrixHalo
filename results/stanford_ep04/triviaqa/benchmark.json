@@ -1,0 +1,22 @@
+{
+  "name": "triviaqa",
+  "config": "triviaqa",
+  "split": "test",
+  "scoring": "exact_match",
+  "metrics": [
+    "exact_match",
+    "bleu1",
+    "bleu4",
+    "f1",
+    "rouge1",
+    "rougeL",
+    "meteor"
+  ],
+  "rows_in_split": 500,
+  "max_new_tokens": 64,
+  "system_prompt": "You are a helpful assistant that answers trivia questions using a compressed memory of retrieved Wikipedia articles. Answer concisely with a short factual phrase or single word.",
+  "suffix": "\n\nAnswer with the exact short factual phrase that answers the question. For example:\n- \"Mark Twain\"\n- \"1969\"\n- \"Mount Everest\"\n- \"the Pacific Ocean\"\n- \"carbon dioxide\"\n\nYour answer:",
+  "baseline_system_prompt": "You are a helpful assistant.",
+  "baseline_suffix": "\n\nAnswer with the exact short factual phrase that answers the question. For example:\n- \"Mark Twain\"\n- \"1969\"\n- \"Mount Everest\"\n- \"the Pacific Ocean\"\n- \"carbon dioxide\"\n\nYour answer:",
+  "baseline_max_new_tokens": 64
+}

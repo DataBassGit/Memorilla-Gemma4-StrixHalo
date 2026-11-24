@@ -1,3 +1,5 @@
+[![Model on HF](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-md.svg)](https://huggingface.co/DataPhreak/Memorilla-Gemma4-26B-A4B)
+
 # Memorilla for Gemma 4 on a Strix Halo
 
 An unofficial port of Stanford SNAP's [Memorilla](https://github.com/snap-stanford/memorilla) memory module to a frozen, 4-bit **Gemma 4 26B-A4B** decoder, trained on a single AMD Strix Halo workstation with about a tenth of the original training data.
@@ -15,6 +17,7 @@ This repo tests whether the idea holds up when three things change at once:
 It does hold up. Sixteen tokens raise the frozen 4-bit decoder's score on all eight of Stanford's benchmarks. The run also includes a control that Stanford's results table does not have, and that control changes how three of the eight results should be read. Both are below.
 
 > This is an independent project. It is not affiliated with or endorsed by Stanford SNAP or Google.
+> Weights are published on [Hugging Face](https://huggingface.co/DataPhreak/Memorilla-Gemma4-26B-A4B).
 
 ## Results
 

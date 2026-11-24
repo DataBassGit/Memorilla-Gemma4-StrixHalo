@@ -1,0 +1,21 @@
+{
+  "name": "narrativeqa",
+  "config": "narrativeqa",
+  "split": "test",
+  "scoring": "generation",
+  "metrics": [
+    "bleu1",
+    "bleu4",
+    "rouge1",
+    "rougeL",
+    "f1",
+    "meteor"
+  ],
+  "rows_in_split": 10557,
+  "max_new_tokens": 32,
+  "system_prompt": "You are a personalized AI assistant. Answer the question about the user based on your understanding of the user.",
+  "suffix": "",
+  "baseline_system_prompt": "You are a question-answering assistant. Provide a direct, brief answer in 1-2 sentences. Do not include preamble, context, or explanation.",
+  "baseline_suffix": "",
+  "baseline_max_new_tokens": 64
+}

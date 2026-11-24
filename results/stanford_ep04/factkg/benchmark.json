@@ -1,0 +1,16 @@
+{
+  "name": "factkg",
+  "config": "factkg",
+  "split": "test",
+  "scoring": "choice",
+  "metrics": [
+    "accuracy"
+  ],
+  "rows_in_split": 9041,
+  "max_new_tokens": 8,
+  "system_prompt": "You are a personalized AI assistant. Answer the question about the user based on your understanding of the user.",
+  "suffix": "",
+  "baseline_system_prompt": "You are a fact-verification assistant. Decide whether the given claim is true or false based on your knowledge. Output exactly 'True' or 'False' with no other text.",
+  "baseline_suffix": "\n\nOutput ONLY \"True\" or \"False\". Do not include explanations, rephrasings, or any other text. Examples:\n\nQ: Is the following claim true or false? Claim: Albert Einstein was born in Germany.\nA: True\n\nQ: Is the following claim true or false? Claim: The Eiffel Tower is in London.\nA: False\n\nQ: Is the following claim true or false? Claim: Water boils at 100 degrees Celsius at standard atmospheric pressure.\nA: True\n\nQ: Is the following claim true or false? Claim: Mars has more moons than Jupiter.\nA: False\n\nQ: Is the following claim true or false? Claim: William Shakespeare wrote Hamlet.\nA: True\n\nA:\n",
+  "baseline_max_new_tokens": 8
+}

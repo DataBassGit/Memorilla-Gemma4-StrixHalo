@@ -27,13 +27,10 @@ collections/
 # 3. Model Checkpoints, Weights & Training Runs
 checkpoints/
 runs/
+# Evaluation outputs stay local, except the published Stanford-protocol run
+# (summary, run settings and per-row answers behind the README tables).
 results/*
 !results/stanford_ep04/
-results/stanford_ep04/*
-!results/stanford_ep04/summary.json
-!results/stanford_ep04/run.json
-!results/stanford_ep04/judge.json
-!results/stanford_ep04/encoder_check.json
 lightning_logs/
 wandb/
 *.pt
@@ -54,6 +51,7 @@ metrics_history.jsonl
 # 5. Hugging Face & PyTorch Local Caches
 .cache/
 hf_cache/
+hf_release/
 models--*/
 
 # 6. Environment Secrets & OS / IDE Metadata

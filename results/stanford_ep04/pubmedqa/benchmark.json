@@ -1,0 +1,16 @@
+{
+  "name": "pubmedqa",
+  "config": "pubmedqa",
+  "split": "test",
+  "scoring": "polarity",
+  "metrics": [
+    "accuracy"
+  ],
+  "rows_in_split": 100,
+  "max_new_tokens": 64,
+  "system_prompt": "You are a personalized AI assistant. Answer the question about the user based on your understanding of the user.",
+  "suffix": "",
+  "baseline_system_prompt": "You are a helpful assistant.",
+  "baseline_suffix": "\nAnswer the research question with one of \"Yes.\", \"No.\", or \"Maybe.\" followed by a brief justification, in the format:\n- \"Yes. UDR provides an objective measurement of VUR and appears as a predictive tool of success after endoscopic injection.\"\n- \"Yes. Serum TB level was independently associated with cardioembolic stroke.\"\n- \"No. The results of this study cast doubt on the suggested advantage of HBO in reducing patient mortality and morbidity.\"\n- \"No. Baseline pain intensity does not predict the outcome after an appropriate opioid titration.\"\n- \"Maybe. The body mass index is one of the prognostic factors of stage 2 and 3a gastric cancer but not for other stages.\"\n- \"Maybe. Limb-salvage surgery offers better gait efficiency than above-knee amputation, but does not improve perceived quality of life.\"\n\nYour answer:",
+  "baseline_max_new_tokens": 64
+}

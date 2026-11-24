@@ -1,0 +1,17 @@
+{
+  "name": "pv4",
+  "config": "pv4",
+  "split": "test",
+  "scoring": "choice",
+  "metrics": [
+    "accuracy",
+    "accuracy_hard"
+  ],
+  "rows_in_split": 4237,
+  "max_new_tokens": 256,
+  "system_prompt": "You are a personalized AI assistant. Answer the question about the user based on your understanding of the user.",
+  "suffix": "",
+  "baseline_system_prompt": "You are a helpful assistant.",
+  "baseline_suffix": "",
+  "baseline_max_new_tokens": 256
+}
