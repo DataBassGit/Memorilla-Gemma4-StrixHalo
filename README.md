@@ -39,6 +39,8 @@ Every row was run three ways:
 
 Intervals are paired bootstrap over the same rows. A bold difference has an interval that excludes zero.
 
+The raw outputs are in [`results/stanford_ep04`](./results/stanford_ep04). `summary.json` holds every number in these tables, and the per-row answer files for all three conditions let you re-score the run without generating anything: `python stanford_eval_gemma4.py score --output_dir results\stanford_ep04`.
+
 **1. The tokens help everywhere.** Memory beats closed book on all eight benchmarks, and every one of those intervals excludes zero. The decoder is frozen and quantized; the only thing added is 16 input tokens. PubMedQA doubles and LaMP-4 triples.
 
 **2. On four benchmarks the documents demonstrably matter.** FactKG, TriviaQA, LaMP-4 and NarrativeQA all score higher with the right documents than with someone else's. LaMP-7 is borderline: the gap is positive on F1 (+1.42 [0.08, 2.78]) but its ROUGE-L interval touches zero.
@@ -221,13 +223,14 @@ We have not run this. The script was developed and used with the Gemma decoder; 
 | [`configs/`](./configs) | Stage 1–3 recipes |
 | [`example.bat.txt`](./example.bat.txt) | End-to-end PowerShell workflow |
 | [`stanford_eval_gemma4.py`](./stanford_eval_gemma4.py) | Stanford-protocol evaluation with controls and the judge |
+| [`results/stanford_ep04/`](./results/stanford_ep04) | Outputs of the published evaluation: summary, run settings, per-row answers, judge verdicts |
 | [`final_eval_gemma4.py`](./final_eval_gemma4.py) | Earlier likelihood-based evaluation used during training |
 | [`train.py`](./train.py), [`evaluate.py`](./evaluate.py) | Upstream entry points with the patch import added |
 | [`memorilla_studio.html`](./memorilla_studio.html) | Training dashboard |
 
 ## Credits and license
 
-Memorilla is the work of Fallahpour, Idehpour, Kothapalli, Mounier, Wu, Pardis and Leskovec at Stanford SNAP. Their [code](https://github.com/snap-stanford/memorilla) is released under Apache 2.0, and `train.py` and `evaluate.py` here are modified copies of their files. Their [data and checkpoints](https://huggingface.co/memorilla) are on Hugging Face; each dataset keeps its source license. [Gemma 4 26B-A4B](https://huggingface.co/google/gemma-4-26B-A4B-it) and [Qwen3-Embedding-4B](https://huggingface.co/Qwen/Qwen3-Embedding-4B) are used under the licenses on their model pages.
+Memorilla is the work of Fallahpour, Idehpour, Kothapalli, Mounier, Wu, Pardis and Leskovec at Stanford SNAP. Their [code](https://github.com/snap-stanford/memorilla) is released under Apache 2.0, and `train.py` and `evaluate.py` here are modified copies of their files. Their [data and checkpoints](https://huggingface.co/memorilla) are on Hugging Face; each dataset keeps its source license. The per-row files under `results/` quote test questions and reference answers from those datasets and stay under the same licenses. [Gemma 4 26B-A4B](https://huggingface.co/google/gemma-4-26B-A4B-it) and [Qwen3-Embedding-4B](https://huggingface.co/Qwen/Qwen3-Embedding-4B) are used under the licenses on their model pages.
 
 ```bibtex
 @article{fallahpour2026memorilla,

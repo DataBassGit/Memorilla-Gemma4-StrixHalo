@@ -1,0 +1,508 @@
+{
+  "run": {
+    "script_version": "1.0",
+    "checkpoint": "checkpoints\\stage3_gemma4\\epoch-04\\memory.pt",
+    "checkpoint_sha256": "1ffad0557d43796255a25c2a03620e4159542d8073b0627123dbafb605ff472a",
+    "decoder": "google/gemma-4-26B-A4B-it",
+    "encoder": "Qwen/Qwen3-Embedding-4B",
+    "seed": 23,
+    "train_prompt": false
+  },
+  "encoder_check": {
+    "mean_cosine": 0.9998,
+    "min_cosine": 0.9997,
+    "ok": true,
+    "append_eos": false
+  },
+  "judge": {
+    "script_version": "1.1",
+    "judge_model": "google/gemma-4-26B-A4B-it",
+    "sees": "the answer and the options; plus the question for yes/no/maybe benchmarks; never the reference, the documents or memory tokens",
+    "system_prompt": "You are a careful grader. You compare texts and reply with a single letter.",
+    "choice_template": "Below is a RESPONSE, followed by {count} OPTIONS labelled {first} to {last}.\n\nPick the option that says the same thing as the response: the same recommendation, the same facts, the same position. Go by content, not by wording, length or formatting. If no option matches exactly, pick the closest one.\n\nRESPONSE:\n<<<\n{response}\n>>>\n\nOPTIONS:\n\n{options}\n\nAnswer with one letter ({letters}) and nothing else.",
+    "polarity_template": "Below is a QUESTION and a RESPONSE to it, followed by {count} OPTIONS labelled {first} to {last}.\n\nPick the option that states the answer the response gives to the question. Report what the response says, not what you believe the right answer is.\n\nQUESTION:\n<<<\n{question}\n>>>\n\nRESPONSE:\n<<<\n{response}\n>>>\n\nOPTIONS:\n\n{options}\n\nAnswer with one letter ({letters}) and nothing else."
+  },
+  "benchmarks": {
+    "factkg": {
+      "scoring": "choice",
+      "split": "test",
+      "rows_in_split": 9041,
+      "conditions": {
+        "memory": {
+          "num_examples": 500,
+          "accuracy": 79.8
+        },
+        "shuffled": {
+          "num_examples": 500,
+          "accuracy": 69.4
+        },
+        "closed_book": {
+          "num_examples": 500,
+          "accuracy": 67.0
+        }
+      },
+      "differences": {
+        "memory_minus_shuffled:accuracy": {
+          "rows": 500,
+          "mean": 10.4,
+          "ci95": [
+            6.0,
+            14.8
+          ]
+        },
+        "memory_minus_closed_book:accuracy": {
+          "rows": 500,
+          "mean": 12.8,
+          "ci95": [
+            8.6,
+            17.2
+          ]
+        }
+      }
+    },
+    "lamp4": {
+      "scoring": "generation",
+      "split": "test",
+      "rows_in_split": 1925,
+      "conditions": {
+        "memory": {
+          "num_examples": 500,
+          "rouge1": 19.25,
+          "rougeL": 16.96,
+          "f1": 14.55,
+          "meteor": 10.8,
+          "bleu1": 14.27,
+          "bleu4": 1.61
+        },
+        "shuffled": {
+          "num_examples": 500,
+          "rouge1": 15.61,
+          "rougeL": 13.62,
+          "f1": 11.8,
+          "meteor": 8.86,
+          "bleu1": 11.27,
+          "bleu4": 1.4
+        },
+        "closed_book": {
+          "num_examples": 500,
+          "rouge1": 6.63,
+          "rougeL": 5.51,
+          "f1": 5.0,
+          "meteor": 9.29,
+          "bleu1": 2.82,
+          "bleu4": 0.25
+        }
+      },
+      "differences": {
+        "memory_minus_shuffled:f1": {
+          "rows": 500,
+          "mean": 2.75,
+          "ci95": [
+            1.65,
+            3.89
+          ]
+        },
+        "memory_minus_shuffled:rougeL": {
+          "rows": 500,
+          "mean": 3.34,
+          "ci95": [
+            2.37,
+            4.37
+          ]
+        },
+        "memory_minus_closed_book:f1": {
+          "rows": 500,
+          "mean": 9.55,
+          "ci95": [
+            8.43,
+            10.65
+          ]
+        },
+        "memory_minus_closed_book:rougeL": {
+          "rows": 500,
+          "mean": 11.45,
+          "ci95": [
+            10.38,
+            12.53
+          ]
+        }
+      }
+    },
+    "lamp7": {
+      "scoring": "generation",
+      "split": "test",
+      "rows_in_split": 1500,
+      "conditions": {
+        "memory": {
+          "num_examples": 500,
+          "rouge1": 51.89,
+          "rougeL": 46.24,
+          "f1": 42.36,
+          "meteor": 37.82,
+          "bleu1": 41.68,
+          "bleu4": 14.77
+        },
+        "shuffled": {
+          "num_examples": 500,
+          "rouge1": 50.39,
+          "rougeL": 44.96,
+          "f1": 40.93,
+          "meteor": 36.45,
+          "bleu1": 40.32,
+          "bleu4": 13.74
+        },
+        "closed_book": {
+          "num_examples": 500,
+          "rouge1": 43.63,
+          "rougeL": 37.76,
+          "f1": 31.34,
+          "meteor": 27.13,
+          "bleu1": 31.18,
+          "bleu4": 7.89
+        }
+      },
+      "differences": {
+        "memory_minus_shuffled:f1": {
+          "rows": 500,
+          "mean": 1.42,
+          "ci95": [
+            0.08,
+            2.78
+          ]
+        },
+        "memory_minus_shuffled:rougeL": {
+          "rows": 500,
+          "mean": 1.28,
+          "ci95": [
+            -0.12,
+            2.72
+          ]
+        },
+        "memory_minus_closed_book:f1": {
+          "rows": 500,
+          "mean": 11.02,
+          "ci95": [
+            9.51,
+            12.49
+          ]
+        },
+        "memory_minus_closed_book:rougeL": {
+          "rows": 500,
+          "mean": 8.47,
+          "ci95": [
+            7.0,
+            9.92
+          ]
+        }
+      }
+    },
+    "narrativeqa": {
+      "scoring": "generation",
+      "split": "test",
+      "rows_in_split": 10557,
+      "conditions": {
+        "memory": {
+          "num_examples": 500,
+          "bleu1": 16.55,
+          "bleu4": 2.25,
+          "rouge1": 19.37,
+          "rougeL": 18.76,
+          "f1": 16.62,
+          "meteor": 11.7
+        },
+        "shuffled": {
+          "num_examples": 500,
+          "bleu1": 15.49,
+          "bleu4": 3.13,
+          "rouge1": 16.26,
+          "rougeL": 15.8,
+          "f1": 14.2,
+          "meteor": 9.96
+        },
+        "closed_book": {
+          "num_examples": 500,
+          "bleu1": 4.27,
+          "bleu4": 0.44,
+          "rouge1": 8.68,
+          "rougeL": 7.79,
+          "f1": 7.07,
+          "meteor": 8.57
+        }
+      },
+      "differences": {
+        "memory_minus_shuffled:f1": {
+          "rows": 500,
+          "mean": 2.43,
+          "ci95": [
+            0.84,
+            4.09
+          ]
+        },
+        "memory_minus_shuffled:rougeL": {
+          "rows": 500,
+          "mean": 2.96,
+          "ci95": [
+            1.34,
+            4.78
+          ]
+        },
+        "memory_minus_closed_book:f1": {
+          "rows": 500,
+          "mean": 9.56,
+          "ci95": [
+            7.6,
+            11.5
+          ]
+        },
+        "memory_minus_closed_book:rougeL": {
+          "rows": 500,
+          "mean": 10.97,
+          "ci95": [
+            8.9,
+            13.03
+          ]
+        }
+      }
+    },
+    "pmv2": {
+      "scoring": "choice",
+      "split": "test",
+      "rows_in_split": 5000,
+      "conditions": {
+        "memory": {
+          "num_examples": 500,
+          "accuracy": 33.8,
+          "judge_accuracy": 32.2
+        },
+        "shuffled": {
+          "num_examples": 500,
+          "accuracy": 34.6,
+          "judge_accuracy": 34.4
+        },
+        "closed_book": {
+          "num_examples": 500,
+          "accuracy": 28.2
+        }
+      },
+      "judge": {
+        "memory": {
+          "rows": 500,
+          "judge_accuracy": 32.2,
+          "stanford_accuracy_same_rows": 33.8,
+          "same_pick": 65.6,
+          "both_correct": 21.4,
+          "only_stanford_correct": 12.4,
+          "only_judge_correct": 10.8,
+          "neither_correct": 55.4,
+          "judge_probability_on_letters": 0.905,
+          "judge_rotations_unanimous": 69.8
+        },
+        "shuffled": {
+          "rows": 500,
+          "judge_accuracy": 34.4,
+          "stanford_accuracy_same_rows": 34.6,
+          "same_pick": 69.8,
+          "both_correct": 23.6,
+          "only_stanford_correct": 11.0,
+          "only_judge_correct": 10.8,
+          "neither_correct": 54.6,
+          "judge_probability_on_letters": 0.903,
+          "judge_rotations_unanimous": 69.2
+        }
+      },
+      "differences": {
+        "memory_minus_shuffled:accuracy": {
+          "rows": 500,
+          "mean": -0.8,
+          "ci95": [
+            -5.0,
+            3.4
+          ]
+        },
+        "memory_minus_shuffled:judge_accuracy": {
+          "rows": 500,
+          "mean": -2.2,
+          "ci95": [
+            -6.4,
+            1.8
+          ]
+        },
+        "memory_minus_closed_book:accuracy": {
+          "rows": 500,
+          "mean": 5.6,
+          "ci95": [
+            1.2,
+            10.4
+          ]
+        }
+      }
+    },
+    "pubmedqa": {
+      "scoring": "polarity",
+      "split": "test",
+      "rows_in_split": 100,
+      "conditions": {
+        "memory": {
+          "num_examples": 100,
+          "accuracy": 46.0,
+          "no_yes_no_maybe": 0.0
+        },
+        "shuffled": {
+          "num_examples": 100,
+          "accuracy": 51.0,
+          "no_yes_no_maybe": 0.0
+        },
+        "closed_book": {
+          "num_examples": 100,
+          "accuracy": 23.0,
+          "no_yes_no_maybe": 18.0
+        }
+      },
+      "differences": {
+        "memory_minus_shuffled:accuracy": {
+          "rows": 100,
+          "mean": -5.0,
+          "ci95": [
+            -14.0,
+            4.0
+          ]
+        },
+        "memory_minus_closed_book:accuracy": {
+          "rows": 100,
+          "mean": 23.0,
+          "ci95": [
+            9.0,
+            36.0
+          ]
+        }
+      }
+    },
+    "pv4": {
+      "scoring": "choice",
+      "split": "test",
+      "rows_in_split": 4237,
+      "conditions": {
+        "memory": {
+          "num_examples": 500,
+          "accuracy": 67.6,
+          "accuracy_hard": 51.39
+        },
+        "shuffled": {
+          "num_examples": 500,
+          "accuracy": 65.4,
+          "accuracy_hard": 48.61
+        },
+        "closed_book": {
+          "num_examples": 500,
+          "accuracy": 61.6,
+          "accuracy_hard": 41.67
+        }
+      },
+      "differences": {
+        "memory_minus_shuffled:accuracy": {
+          "rows": 500,
+          "mean": 2.2,
+          "ci95": [
+            -1.8,
+            6.2
+          ]
+        },
+        "memory_minus_closed_book:accuracy": {
+          "rows": 500,
+          "mean": 6.0,
+          "ci95": [
+            0.8,
+            11.4
+          ]
+        }
+      }
+    },
+    "triviaqa": {
+      "scoring": "exact_match",
+      "split": "test",
+      "rows_in_split": 500,
+      "conditions": {
+        "memory": {
+          "num_examples": 500,
+          "exact_match": 63.2,
+          "bleu1": 51.21,
+          "bleu4": 11.31,
+          "f1": 63.97,
+          "rouge1": 70.18,
+          "rougeL": 69.89,
+          "meteor": 43.86
+        },
+        "shuffled": {
+          "num_examples": 500,
+          "exact_match": 56.2,
+          "bleu1": 48.37,
+          "bleu4": 10.18,
+          "f1": 57.91,
+          "rouge1": 63.09,
+          "rougeL": 62.8,
+          "meteor": 39.37
+        },
+        "closed_book": {
+          "num_examples": 500,
+          "exact_match": 54.0,
+          "bleu1": 33.6,
+          "bleu4": 8.16,
+          "f1": 60.38,
+          "rouge1": 62.42,
+          "rougeL": 62.13,
+          "meteor": 44.54
+        }
+      },
+      "differences": {
+        "memory_minus_shuffled:exact_match": {
+          "rows": 500,
+          "mean": 7.0,
+          "ci95": [
+            4.2,
+            10.0
+          ]
+        },
+        "memory_minus_shuffled:f1": {
+          "rows": 500,
+          "mean": 6.07,
+          "ci95": [
+            3.11,
+            9.04
+          ]
+        },
+        "memory_minus_shuffled:rougeL": {
+          "rows": 500,
+          "mean": 7.09,
+          "ci95": [
+            4.4,
+            10.0
+          ]
+        },
+        "memory_minus_closed_book:exact_match": {
+          "rows": 500,
+          "mean": 9.2,
+          "ci95": [
+            5.8,
+            12.6
+          ]
+        },
+        "memory_minus_closed_book:f1": {
+          "rows": 500,
+          "mean": 3.59,
+          "ci95": [
+            0.57,
+            6.77
+          ]
+        },
+        "memory_minus_closed_book:rougeL": {
+          "rows": 500,
+          "mean": 7.76,
+          "ci95": [
+            4.66,
+            10.91
+          ]
+        }
+      }
+    }
+  }
+}

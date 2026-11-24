@@ -1,0 +1,9 @@
+{
+  "script_version": "1.0",
+  "checkpoint": "checkpoints\\stage3_gemma4\\epoch-04\\memory.pt",
+  "checkpoint_sha256": "1ffad0557d43796255a25c2a03620e4159542d8073b0627123dbafb605ff472a",
+  "decoder": "google/gemma-4-26B-A4B-it",
+  "encoder": "Qwen/Qwen3-Embedding-4B",
+  "seed": 23,
+  "train_prompt": false
+}

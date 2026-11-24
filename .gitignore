@@ -27,7 +27,13 @@ collections/
 # 3. Model Checkpoints, Weights & Training Runs
 checkpoints/
 runs/
-results/
+results/*
+!results/stanford_ep04/
+results/stanford_ep04/*
+!results/stanford_ep04/summary.json
+!results/stanford_ep04/run.json
+!results/stanford_ep04/judge.json
+!results/stanford_ep04/encoder_check.json
 lightning_logs/
 wandb/
 *.pt

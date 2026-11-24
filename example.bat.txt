@@ -123,3 +123,17 @@ python evaluate.py `
     --split test `
     --checkpoint .\checkpoints\stage3_gemma4\epoch-04 `
     --output_dir .\results\gemma4_stage3_test_ep04
+
+# 1. Stanford's evaluation, 500 rows per benchmark
+python stanford_eval_gemma4.py generate --checkpoint .\checkpoints\stage3_gemma4\epoch-04 `
+    --data_repo .\data_10pct --benchmark all --n 500 --conditions memory --output_dir results\stanford_ep04
+python stanford_eval_gemma4.py score --output_dir results\stanford_ep04
+
+# 2. Controls on the same rows, then score again
+python stanford_eval_gemma4.py generate --checkpoint .\checkpoints\stage3_gemma4\epoch-04 `
+    --data_repo .\data_10pct --benchmark all --n 500 --conditions shuffled closed_book --output_dir results\stanford_ep04
+python stanford_eval_gemma4.py score --output_dir results\stanford_ep04
+
+# 3. Sanity check on PMv2
+python stanford_eval_gemma4.py judge --output_dir results\stanford_ep04 --benchmark pmv2 --conditions memory shuffled
+python stanford_eval_gemma4.py score --output_dir results\stanford_ep04

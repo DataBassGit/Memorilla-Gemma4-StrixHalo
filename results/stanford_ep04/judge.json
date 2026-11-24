@@ -1,0 +1,8 @@
+{
+  "script_version": "1.1",
+  "judge_model": "google/gemma-4-26B-A4B-it",
+  "sees": "the answer and the options; plus the question for yes/no/maybe benchmarks; never the reference, the documents or memory tokens",
+  "system_prompt": "You are a careful grader. You compare texts and reply with a single letter.",
+  "choice_template": "Below is a RESPONSE, followed by {count} OPTIONS labelled {first} to {last}.\n\nPick the option that says the same thing as the response: the same recommendation, the same facts, the same position. Go by content, not by wording, length or formatting. If no option matches exactly, pick the closest one.\n\nRESPONSE:\n<<<\n{response}\n>>>\n\nOPTIONS:\n\n{options}\n\nAnswer with one letter ({letters}) and nothing else.",
+  "polarity_template": "Below is a QUESTION and a RESPONSE to it, followed by {count} OPTIONS labelled {first} to {last}.\n\nPick the option that states the answer the response gives to the question. Report what the response says, not what you believe the right answer is.\n\nQUESTION:\n<<<\n{question}\n>>>\n\nRESPONSE:\n<<<\n{response}\n>>>\n\nOPTIONS:\n\n{options}\n\nAnswer with one letter ({letters}) and nothing else."
+}
